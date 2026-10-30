@@ -14,3 +14,6 @@ android/.idea/
 *.apk
 *.keystore
 *.jks
+!android/signing/uren.jks
+server/apk/*
+!server/apk/.gitkeep

@@ -1,17 +1,12 @@
-# TrueNAS SCALE: Apps -> Discover Apps -> (⋮) Install via YAML -> plak dit bestand.
-# Pas het pad van de dataset en het wachtwoord aan.
+# Alternatief voor het TrueNAS-formulier (Apps -> Discover Apps -> ⋮ -> Install via YAML).
+# Alleen het pad naar je dataset aanpassen. Wachtwoord en alle andere instellingen regel je in de web-app.
 services:
   uren:
     image: ghcr.io/lvos04/uren_leon:latest
-    container_name: uren
     restart: unless-stopped
     ports:
       - "8085:8080"
     environment:
-      APP_PASSWORD: "kies-een-sterk-wachtwoord"
       TZ: Europe/Amsterdam
-      BACKUP_TIME: "03:00"
-      RCLONE_REMOTE: "onedrive:UrenBackup"
-      SESSION_HTTPS_ONLY: "1"   # zet op "0" als je de web-UI zonder https gebruikt
     volumes:
       - /mnt/tank/apps/uren:/data

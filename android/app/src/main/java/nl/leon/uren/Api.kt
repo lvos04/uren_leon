@@ -73,6 +73,19 @@ class Api(private val prefs: Prefs) {
         JSONObject(open("/month/$year/$month").body())
     }
 
+    suspend fun appVersion(): JSONObject = withContext(Dispatchers.IO) {
+        JSONObject(open("/app-version").body())
+    }
+
+    suspend fun downloadApk(target: File): File = withContext(Dispatchers.IO) {
+        val c = open("/app.apk")
+        c.setRequestProperty("Accept", "application/vnd.android.package-archive")
+        if (c.responseCode !in 200..299) c.body()
+        target.parentFile?.mkdirs()
+        c.inputStream.use { inp -> target.outputStream().use { inp.copyTo(it) } }
+        target
+    }
+
     suspend fun downloadPdf(year: Int, month: Int, target: File): File = withContext(Dispatchers.IO) {
         val c = open("/print/$year/$month.pdf")
         c.setRequestProperty("Accept", "application/pdf")

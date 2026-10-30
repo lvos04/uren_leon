@@ -48,6 +48,8 @@ import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableState
+import androidx.compose.runtime.key
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -79,9 +81,27 @@ private val DAY_FMT = DateTimeFormatter.ofPattern("EEEE d MMMM", NL)
 
 class MainActivity : ComponentActivity() {
     private val askNotify = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    private val pairedEvent = mutableStateOf<String?>(null)
+
+    private fun handlePairLink(intent: Intent?) {
+        val pair = parsePairLink(intent?.dataString) ?: return
+        val prefs = Prefs(this)
+        prefs.serverUrl = pair.first
+        prefs.token = pair.second
+        prefs.lastSyncError = ""
+        Sync.enqueue(this)
+        pairedEvent.value = pair.first
+        intent?.data = null
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        handlePairLink(intent)
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        handlePairLink(intent)
         Reminder.createChannel(this)
         Reminder.schedule(this)
         Sync.schedulePeriodic(this)
@@ -89,19 +109,34 @@ class MainActivity : ComponentActivity() {
         if (Build.VERSION.SDK_INT >= 33) askNotify.launch(Manifest.permission.POST_NOTIFICATIONS)
         setContent {
             MaterialTheme(colorScheme = if (isSystemInDarkTheme()) darkColorScheme() else lightColorScheme()) {
-                App()
+                App(pairedEvent)
             }
         }
     }
 }
 
 @Composable
-fun App() {
+fun App(paired: MutableState<String?>) {
     val ctx = LocalContext.current
     val prefs = remember { Prefs(ctx) }
     var tab by remember { mutableIntStateOf(if (prefs.configured) 0 else 3) }
     var selected by remember { mutableStateOf(LocalDate.now()) }
     val snack = remember { SnackbarHostState() }
+    val scope = rememberCoroutineScope()
+    var update by remember { mutableStateOf<Pair<Int, String>?>(null) }
+    var settingsKey by remember { mutableIntStateOf(0) }
+
+    LaunchedEffect(paired.value) {
+        paired.value?.let {
+            tab = 0
+            settingsKey++
+            snack.showSnackbar("Gekoppeld met $it")
+            paired.value = null
+        }
+    }
+    LaunchedEffect(prefs.configured, settingsKey) {
+        update = runCatching { Update.check(ctx) }.getOrNull()
+    }
     Scaffold(
         snackbarHost = { SnackbarHost(snack) },
         bottomBar = {
@@ -117,11 +152,25 @@ fun App() {
             Modifier.padding(pad).fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            update?.let { (_, name) ->
+                Card(Modifier.fillMaxWidth()) {
+                    Row(Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text("Nieuwe versie $name beschikbaar", Modifier.weight(1f))
+                        Button({
+                            scope.launch {
+                                try { Update.downloadAndInstall(ctx) } catch (e: Exception) {
+                                    snack.showSnackbar("Update mislukt: ${e.message ?: "geen verbinding"}")
+                                }
+                            }
+                        }) { Text("Installeren") }
+                    }
+                }
+            }
             when (tab) {
                 0 -> DayScreen(selected, { selected = it }, snack)
                 1 -> WeekScreen(selected) { selected = it; tab = 0 }
                 2 -> MonthScreen(snack)
-                else -> SettingsScreen(snack)
+                else -> key(settingsKey) { SettingsScreen(snack) }
             }
         }
     }
@@ -349,6 +398,10 @@ fun SettingsScreen(snack: SnackbarHostState) {
     var remM by remember { mutableIntStateOf(prefs.reminderMinute) }
 
     Text("Server", style = MaterialTheme.typography.titleLarge)
+    if (!prefs.configured) Card(Modifier.fillMaxWidth()) {
+        Text("Makkelijkst: open de web-app → Instellingen → Telefoon koppelen, en tik op \"Open in de Uren-app\" " +
+            "(of scan de QR-code). Dan wordt alles hieronder vanzelf ingevuld.", Modifier.padding(16.dp))
+    }
     OutlinedTextField(url, { url = it }, Modifier.fillMaxWidth(), label = { Text("Server-URL, bv. https://uren.mijndomein.nl") }, singleLine = true,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri))
     OutlinedTextField(token, { token = it }, Modifier.fillMaxWidth(), label = { Text("Token (web-app → Instellingen)") }, singleLine = true)
@@ -382,4 +435,5 @@ fun SettingsScreen(snack: SnackbarHostState) {
     }, enabled = remOn) { Text("Tijd: %02d:%02d".format(remH, remM)) }
     Text("Je krijgt geen melding als je die dag al uren of vakantie hebt ingevuld.", style = MaterialTheme.typography.bodySmall)
     OutlinedButton({ Reminder.notify(ctx) }) { Text("Test melding") }
+    Text("App-versie ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodySmall)
 }

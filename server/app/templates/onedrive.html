@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}OneDrive koppelen{% endblock %}
+{% block content %}
+<h1>OneDrive koppelen</h1>
+{% if error %}<div class="msg bad">{{ error }}</div>{% endif %}
+{% if linked and not login_url %}<div class="msg">OneDrive is al gekoppeld. Opnieuw koppelen vervangt de huidige koppeling.</div>{% endif %}
+
+{% if not login_url %}
+<div class="card">
+  <p>Je logt één keer in bij Microsoft. Daarna zet de server elke nacht de backup in je OneDrive (map <b>{{ folder or 'UrenBackup' }}</b>).</p>
+  <form method="post" action="/onedrive/start"><button type="submit">Start koppelen</button></form>
+</div>
+{% else %}
+<div class="card">
+  <p><b>Stap 1.</b> Tik op de knop en log in met je Microsoft-account. Geef toestemming als daarom gevraagd wordt.</p>
+  <p><a class="btn" href="{{ login_url }}" target="_blank" rel="noopener">Inloggen bij Microsoft</a></p>
+  <p><b>Stap 2.</b> Na het inloggen kom je op een pagina die <b>niet laadt</b> ("Deze site is niet bereikbaar"). Dat is de bedoeling.
+  Kopieer het <b>hele adres</b> uit de adresbalk van die pagina. Het begint met <code>http://localhost:53682/?code=</code>.</p>
+  <p><b>Stap 3.</b> Plak dat adres hier:</p>
+  <form method="post" action="/onedrive/finish">
+    <input type="text" name="adres" placeholder="http://localhost:53682/?code=..." required style="width:100%;margin-bottom:10px" autocomplete="off">
+    <button type="submit">Koppeling afronden</button>
+  </form>
+  <p class="muted">Dit werkt binnen 20 minuten na stap 1. Lukt het niet, begin dan opnieuw.</p>
+</div>
+{% endif %}
+<p><a href="/instellingen#backup">← Terug naar instellingen</a></p>
+{% endblock %}

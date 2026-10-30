@@ -35,3 +35,17 @@ class DayTest {
         assertEquals(7.25, parseHours("7,25")!!, 0.0)
     }
 }
+
+class PairLinkTest {
+    @Test fun leestUrlEnToken() {
+        val p = parsePairLink("uren://koppel?url=https%3A%2F%2Furen.example.nl%2F&token=abc-123_x")
+        assertEquals("https://uren.example.nl" to "abc-123_x", p)
+    }
+
+    @Test fun weigertAndereLinks() {
+        assertEquals(null, parsePairLink("https://evil.example/koppel?url=https://x&token=y"))
+        assertEquals(null, parsePairLink("uren://koppel?url=ftp%3A%2F%2Fx&token=y"))
+        assertEquals(null, parsePairLink("uren://koppel?url=https%3A%2F%2Fx"))
+        assertEquals(null, parsePairLink(null))
+    }
+}

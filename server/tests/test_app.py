@@ -11,12 +11,52 @@ def client():
 
 
 def login(c):
+    from app import auth
+    if not auth.password_is_set():
+        auth.set_password("test-wachtwoord")
     r = c.post("/login", data={"password": "test-wachtwoord", "next": "/"}, follow_redirects=False)
     assert r.status_code == 303
 
 
+def test_eerste_keer_wachtwoord_kiezen(conn):
+    c = client()
+    r = c.get("/jaar/2026", follow_redirects=False)
+    assert r.headers["location"] == "/setup"
+    assert "Kies een wachtwoord" in c.get("/setup").text
+    r = c.post("/setup", data={"password": "kort", "password2": "kort"})
+    assert "minstens 8" in r.text
+    r = c.post("/setup", data={"password": "geheim123", "password2": "geheim123", "naam": "Leon"},
+               follow_redirects=False)
+    assert r.status_code == 303
+    assert c.get("/jaar/2026").status_code == 200  # direct ingelogd
+    # daarna kan niemand het opnieuw instellen
+    c2 = client()
+    assert c2.post("/setup", data={"password": "aanvaller1", "password2": "aanvaller1"},
+                   follow_redirects=False).headers["location"] == "/login"
+    assert c2.post("/login", data={"password": "geheim123"}, follow_redirects=False).status_code == 303
+
+
+def test_setup_niet_via_internet(conn):
+    c = client()
+    r = c.get("/setup", headers={"X-Forwarded-For": "8.8.8.8"})
+    assert "thuisnetwerk" in r.text
+    r = c.post("/setup", data={"password": "geheim123", "password2": "geheim123"},
+               headers={"X-Forwarded-For": "8.8.8.8"})
+    assert r.status_code == 403
+
+
+def test_wachtwoord_wijzigen(conn):
+    c = client()
+    login(c)
+    c.post("/instellingen/wachtwoord", data={"oud": "test-wachtwoord", "nieuw": "nieuwwachtwoord",
+                                             "nieuw2": "nieuwwachtwoord"})
+    from app import auth
+    assert auth.check_password("nieuwwachtwoord")
+
+
 def test_login_vereist(conn):
     c = client()
+    login(client())
     assert c.get("/jaar/2026", follow_redirects=False).status_code == 303
     assert c.get("/api/v1/ping").status_code == 401
 
@@ -49,10 +89,14 @@ def test_pdf_en_export(conn):
 def test_api_token_en_dagen(conn):
     c = client()
     login(c)
-    r = c.post("/tokens", data={"name": "test"}, follow_redirects=False)
-    token = r.headers["location"].split("new_token=")[1]
-    from urllib.parse import unquote
-    token = unquote(token)
+    r = c.post("/koppel", data={"name": "test"})
+    assert "<svg" in r.text and "uren://koppel?" in r.text
+    import re
+    from urllib.parse import parse_qs, unquote, urlparse
+    link = unquote(re.search(r'href="(uren://koppel\?[^"]+)"', r.text).group(1)).replace("&amp;", "&")
+    q = parse_qs(urlparse(link).query)
+    assert q["url"] == ["http://testserver"]
+    token = q["token"][0]
     api = TestClient(c.app)
     h = {"Authorization": f"Bearer {token}"}
     assert api.get("/api/v1/ping", headers=h).json()["ok"]
@@ -73,5 +117,53 @@ def test_api_token_en_dagen(conn):
 def test_backup_zonder_rclone(conn):
     from app import backup
     r = backup.run_backup()
-    assert r["ok"] and r["upload"] == "geen rclone-config"
+    assert r["ok"] and r["upload"] == "OneDrive niet gekoppeld"
     assert (backup.BACKUP_DIR / f"uren-{dt.date.today()}.xlsx").exists()
+
+
+def test_backup_instellingen_en_terugzetten(conn):
+    from app import backup
+    c = client()
+    login(c)
+    c.post("/instellingen/backup", data={"tijd": "4:15", "map": "Werk/Uren", "dagen": "10"})
+    assert backup.get_settings() == {"backup_time": "04:15", "backup_folder": "Werk/Uren", "backup_keep_days": "10"}
+    conn.execute("INSERT INTO days(date, hours, updated_at) VALUES('2026-10-05', 9, 'x')")
+    conn.commit()
+    r = backup.run_backup()
+    name = [f for f in r["files"] if f.endswith(".db")][0]
+    conn.execute("UPDATE days SET hours=1 WHERE date='2026-10-05'")
+    conn.commit()
+    assert c.get(f"/backups/{name}").status_code == 200
+    assert c.get("/backups/..%2Furen.db").status_code == 404
+    c.post(f"/backups/{name}/restore")
+    from app import db
+    with db.get_conn() as c2:
+        assert c2.execute("SELECT hours FROM days WHERE date='2026-10-05'").fetchone()[0] == 9
+    # wachtwoord bleef gelijk na terugzetten
+    from app import auth
+    assert auth.check_password("test-wachtwoord")
+
+
+def test_app_download_en_versie(conn):
+    import json
+    import os
+    from pathlib import Path
+    d = Path(os.environ["APK_DIR"])
+    d.mkdir(exist_ok=True)
+    (d / "uren.apk").write_bytes(b"PK-test")
+    (d / "version.json").write_text(json.dumps({"versionCode": 7, "versionName": "1.7"}))
+    c = client()
+    login(c)
+    assert c.get("/app/uren.apk").content == b"PK-test"
+    assert "versie 1.7" in c.get("/instellingen").text
+    assert c.get("/api/v1/app-version").json()["versionCode"] == 7
+
+
+def test_onedrive_pagina(conn):
+    c = client()
+    login(c)
+    assert "Start koppelen" in c.get("/onedrive").text
+    from app import onedrive
+    import pytest
+    with pytest.raises(RuntimeError, match="verlopen"):
+        onedrive.finish("http://localhost:53682/?code=abc&state=x")

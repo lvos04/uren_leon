@@ -6,3 +6,4 @@ itsdangerous==2.2.0
 apscheduler==3.11.0
 openpyxl==3.1.5
 weasyprint==65.1
+qrcode==8.0

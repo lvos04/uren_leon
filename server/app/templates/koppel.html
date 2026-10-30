@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Telefoon koppelen{% endblock %}
+{% block content %}
+<h1>Telefoon koppelen</h1>
+<div class="card">
+  {% if app %}<p><b>Stap 1.</b> Nog geen app? <a class="btn sec" href="/app/uren.apk">Download de Android-app</a></p>{% endif %}
+  <p><b>Stap {{ 2 if app else 1 }}.</b> Kies een van beide:</p>
+  <ul>
+    <li><b>Op een ander scherm (pc/laptop):</b> scan deze QR-code met de camera van je telefoon en tik op de link.</li>
+    <li><b>Op je telefoon zelf:</b> tik op de knop hieronder.</li>
+  </ul>
+  <div style="max-width:260px;background:#fff;padding:10px;border-radius:8px;margin:10px 0">{{ qr|safe }}</div>
+  <p><a class="btn" href="{{ link }}">Open in de Uren-app</a></p>
+  <p class="muted">De app vult dan zelf het serveradres (<code>{{ url }}</code>) en een sleutel in. Klopt het adres niet?
+  Pas het aan bij Instellingen → Account → "Adres van de server" en koppel opnieuw.</p>
+</div>
+<details class="card"><summary class="muted">Handmatig invullen</summary>
+  <p>Server-URL: <code>{{ url }}</code></p>
+  <p>Token:</p><code class="token">{{ token }}</code>
+</details>
+<p><a href="/instellingen#telefoon">← Terug naar instellingen</a></p>
+{% endblock %}

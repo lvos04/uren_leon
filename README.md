@@ -1,122 +1,106 @@
 # Uren & salaris
 
-Vervangt `salaris_bijhouden_Leon.xlsx`. Drie onderdelen:
+Vervangt `salaris_bijhouden_Leon.xlsx`:
 
-| Onderdeel | Wat | Map |
-|---|---|---|
-| **Server** | Web-app op TrueNAS: uren, overuren, maandoverzicht, vakantiedagen, bruto-netto, printen, Excel-export | `server/` |
-| **Android-app** | Elke dag uren invoeren, herinnering om 20:00 (ma t/m za), maandoverzicht printen | `android/` |
-| **Backup** | Elke nacht database + Excel-bestand naar OneDrive (via rclone in de container) | `server/app/backup.py` |
+- **Web-app op TrueNAS**: uren, overuren, maandoverzicht, vakantiedagen, bruto-netto, printen, Excel-export.
+- **Android-app**: elke dag uren invoeren, herinnering om 20:00 (ma t/m za), maandoverzicht printen.
+- **Backup**: elke nacht naar OneDrive.
+
+Alles stel je in via de web-app. Geen wachtwoorden in bestanden, geen terminal, geen GitHub-secrets.
+
+## Installeren (eenmalig)
+
+### Stap 1 — Image openbaar maken (1 klik op GitHub)
+
+De repo is privé, daarom staat de app-image ook op privé. TrueNAS moet hem kunnen downloaden:
+
+GitHub → je profielfoto → **Your profile** → tab **Packages** → **uren_leon** → **Package settings** (rechts) →
+onderaan **Change visibility** → **Public** → typ `uren_leon` ter bevestiging.
+
+De image bevat alleen de programmacode, geen gegevens.
+
+### Stap 2 — App toevoegen in TrueNAS
+
+TrueNAS → **Apps** → **Discover Apps** → **Custom App**. Vul in:
+
+| Veld | Waarde |
+|---|---|
+| Application Name | `uren` |
+| Image → Repository | `ghcr.io/lvos04/uren_leon` |
+| Image → Tag | `latest` |
+| Environment Variables | `TZ` = `Europe/Amsterdam` |
+| Network → Port Forwarding | Container Port `8080`, Host Port `8085` |
+| Storage → Host Path | Mount Path `/data`, Host Path: een map op je pool, bv. `/mnt/tank/apps/uren` (maak hem aan met het mapje-icoon) |
+
+Klik **Install**. (Liever YAML? Dan kan `server/docker-compose.yml` via ⋮ → *Install via YAML*.)
+
+### Stap 3 — Web-app openen en instellen
+
+1. Open **thuis** `http://<ip-van-truenas>:8085`.
+2. **Kies je wachtwoord** (dit scherm werkt alleen vanaf je thuisnetwerk, zodat niemand anders het eerst kan doen).
+3. **Instellingen → Import**: kies je oude Excel-bestand. Alle jaren 2023–2026 worden overgenomen.
+4. **Instellingen → Backup & OneDrive → OneDrive koppelen**: volg de 3 stappen op het scherm
+   (inloggen bij Microsoft, adres uit de adresbalk kopiëren, plakken).
+5. **Instellingen → Account → Adres van de server**: het adres van je reverse proxy, bv. `https://uren.jouwdomein.nl`.
+6. **Instellingen → Telefoon → Telefoon koppelen**: download de app, installeer hem, en tik op
+   **Open in de Uren-app** (of scan de QR-code). De app is dan gekoppeld.
+
+### Stap 4 — Reverse proxy
+
+Laat je reverse proxy (bv. `uren.jouwdomein.nl`) doorsturen naar `http://<ip-van-truenas>:8085`, met https aan.
+
+## Updates
+
+- **Server**: TrueNAS → Apps → uren → **Update** (of *Pull image* + herstarten) wanneer er een nieuwe versie is.
+- **Telefoon**: de app laat zelf "Nieuwe versie beschikbaar → Installeren" zien zodra de server een nieuwere app heeft.
+  De eerste keer vraagt Android of de Uren-app updates mag installeren: toestaan.
+
+## Backup en terugzetten
+
+Elke nacht (tijd in te stellen) maakt de server een kopie van de database en een Excel-bestand. Die gaan naar
+OneDrive in de map **UrenBackup**. Op de server blijven ze 30 dagen staan (aan te passen).
+Onder *Backups op de server* kun je een backup downloaden of **terugzetten**. Bij terugzetten wordt eerst een extra
+kopie van de huidige gegevens gemaakt, en je wachtwoord en gekoppelde telefoons blijven gewoon werken.
 
 ## Rekenregels (zoals in het Excel)
 
 - Een week loopt van **maandag t/m zondag**. Overuren = weektotaal − contracturen (40).
 - **Zon-/feestdag 1,5× of 2×**: de uren van die dag tellen 1,5 of 2 keer mee in het weektotaal
-  (8 uur op 2× = 16 uur). Zo tellen ze ook voor de overuren. Op zondag staat de app standaard op 2×.
-- Een week hoort bij de maand waarin de **donderdag** valt. Per week kun je dit handmatig aanpassen
-  (week-scherm → "Meer"). Bij de import zijn de maanden overgenomen zoals ze in het Excel stonden.
+  (8 uur op 2× = 16 uur), dus ook voor de overuren. Op zondag staat de app standaard op 2×.
+- Een week hoort bij de maand waarin de **donderdag** valt; per week aan te passen. Bij de import zijn de
+  maanden overgenomen zoals ze in het Excel stonden.
 - **Overuren zijn netto**: overuren × tarief (schaal 1 of 2, per maand te kiezen). Er gaat geen belasting af.
 - Storingsdienst: aantal dagen × bedrag per dag (standaard € 10).
 - Totaal netto per maand = nettoloon + overuren in euro + storingsdienst.
 - Vakantiedagen: totaal per jaar (21) − gebruikt = over; uit te betalen = over × tarief × 8.
-- **Bruto-netto calculator**: schatting voor het vaste salaris met de tarieven van 2024, 2025 en 2026
-  (schijven, algemene heffingskorting, arbeidskorting; bron: Belastingdienst). Nieuwe jaren toevoegen in
-  `server/app/tax_rates.json`.
-
-## 1. Server op TrueNAS installeren
-
-1. Maak een dataset, bijvoorbeeld `tank/apps/uren` (pad `/mnt/tank/apps/uren`).
-2. De Docker-image wordt door GitHub Actions gebouwd: `ghcr.io/lvos04/uren_leon:latest`.
-   Zet het package eenmalig op *public* (GitHub → je profiel → Packages → uren_leon → Package settings →
-   Change visibility), of voeg in TrueNAS je GitHub-inlog toe als registry. Het image bevat geen gegevens.
-3. TrueNAS SCALE: **Apps → Discover Apps → ⋮ → Install via YAML**. Plak `server/docker-compose.yml`
-   en pas aan:
-   - `APP_PASSWORD`: het wachtwoord voor de web-app.
-   - het pad bij `volumes` naar je dataset.
-4. Open `http://<truenas-ip>:8085` en log in.
-5. **Oude gegevens importeren**: Instellingen → *Importeer oud Excel-bestand* → kies het xlsx-bestand.
-   Alle jaren (2023–2026) worden overgenomen: uren, maandsalarissen, schalen, storings- en vakantiedagen,
-   uitbetaalde overuren.
-
-### Bereikbaar via internet (reverse proxy)
-
-Zet een reverse proxy met https voor poort 8085, bijvoorbeeld Nginx Proxy Manager (TrueNAS-app),
-Caddy of een Cloudflare Tunnel, met een eigen (sub)domein zoals `https://uren.jouwdomein.nl`.
-
-- Laat `SESSION_HTTPS_ONLY: "1"` staan zodat het inlogcookie alleen over https gaat.
-- Gebruik een sterk `APP_PASSWORD`. De Android-app gebruikt een apart token dat je kunt intrekken.
-
-## 2. Backup naar OneDrive
-
-De container maakt elke nacht om 03:00 (`BACKUP_TIME`) in `/data/backups` een kopie van de database en een
-Excel-export. Bestanden ouder dan 30 dagen worden lokaal opgeruimd. Daarna kopieert rclone de map naar OneDrive.
-
-OneDrive koppelen (eenmalig, op je pc):
-
-1. Installeer rclone (<https://rclone.org/downloads/>).
-2. Voer `rclone config` uit → `n` (nieuwe remote) → naam **`onedrive`** → type **`onedrive`** →
-   client_id en secret leeg laten → region *global* → inloggen in de browser → kies je OneDrive
-   (*OneDrive Personal or Business*) → bevestigen.
-3. Zoek het configbestand met `rclone config file` en kopieer het naar de dataset als
-   `/mnt/tank/apps/uren/rclone/rclone.conf`.
-4. In de web-app: Instellingen → *Nu backup maken*. Je ziet daar of het gelukt is. De bestanden staan
-   in OneDrive in de map **UrenBackup** (aan te passen met `RCLONE_REMOTE`).
-
-rclone ververst het OneDrive-token zelf en schrijft het terug in `rclone.conf`.
-
-## 3. Android-app
-
-1. Installeer `Uren-x.apk` op je telefoon (toestaan: *installeren uit onbekende bronnen*).
-   Nieuwe versies: GitHub → Actions → *Android* → artifact `uren-apk`, of een release met tag `app-vX`.
-2. Maak in de web-app een token: Instellingen → Android-app → *Nieuw token*.
-3. In de app: Instellingen → server-URL (bijv. `https://uren.jouwdomein.nl`) en het token →
-   *Opslaan en testen*.
-
-Wat de app doet:
-
-- **Dag**: uren invullen (± 0,25), 1× / 1,5× / 2×, storingsdienst, vakantie (halve/hele dag), notitie.
-  Werkt ook offline; de app synchroniseert zodra er verbinding is.
-- **Week**: overzicht met totaal (zon-/feestdagen meegeteld) en overuren.
-- **Maand**: samenvatting en **maandoverzicht printen** (PDF met hele weken), of de PDF delen.
-- **Herinnering** om 20:00 van maandag t/m zaterdag, niet op zondag. Geen melding als je die dag al
-  hebt ingevuld. Tijd aan te passen in Instellingen.
-
-Wijzig je dezelfde dag op de telefoon en in de web-app, dan wint de laatste wijziging.
-
-### APK ondertekenen in GitHub Actions
-
-Zodat updates over de bestaande app heen geïnstalleerd kunnen worden, moet elke versie met dezelfde sleutel
-ondertekend zijn. Zet in GitHub → Settings → Secrets and variables → Actions deze secrets:
-
-| Secret | Waarde |
-|---|---|
-| `UREN_KEYSTORE_B64` | base64 van `uren.jks` |
-| `UREN_KEYSTORE_PASSWORD` | wachtwoord keystore |
-| `UREN_KEY_ALIAS` | `uren` |
-| `UREN_KEY_PASSWORD` | wachtwoord sleutel |
-
-Zonder deze secrets bouwt de workflow wel een APK, maar die kan niet over een eerder geïnstalleerde versie heen.
+- **Bruto-netto**: schatting voor het vaste salaris met de tarieven van 2024–2026 (Belastingdienst).
+  Nieuwe jaren: `server/app/tax_rates.json`.
 
 ## Printen
 
-Web-app → Maand → *Print (PDF)*, of in het jaaroverzicht 🖨 per maand of *Print hele jaar*.
-Elke maand staat op één A4 met per week een blok (ma t/m zo, ook als de week over de maandgrens loopt;
-dagen buiten de maand zijn grijs), en onderaan de maandtotalen.
+Web-app → Maand → *Print (PDF)*, in het jaaroverzicht 🖨 per maand of *Print hele jaar*, of in de app → Maand →
+*Maandoverzicht printen*. Elke maand staat op één A4 met per week een blok (ma t/m zo; dagen buiten de maand grijs)
+en onderaan de maandtotalen.
 
-## Ontwikkelen
+## Wachtwoord kwijt?
+
+Voeg in TrueNAS bij de app de omgevingsvariabele `APP_PASSWORD` toe met een tijdelijk wachtwoord, log daarmee in,
+kies onder Instellingen → Account een nieuw wachtwoord en haal de variabele weer weg.
+
+## Voor ontwikkelaars
 
 ```bash
-cd server
-pip install -r requirements-dev.txt
-APP_PASSWORD=test DATA_DIR=./data uvicorn app.main:app --reload --port 8080
+cd server && pip install -r requirements-dev.txt
+DATA_DIR=./data uvicorn app.main:app --reload --port 8080
 pytest -q                                   # tests
 UREN_XLSX=/pad/naar/salaris.xlsx pytest -q   # ook vergelijken met het oude Excel
+
+cd android && ./gradlew testDebugUnitTest assembleRelease
 ```
 
-```bash
-cd android
-./gradlew testDebugUnitTest assembleDebug
-```
+GitHub Actions (`.github/workflows/build.yml`) bouwt bij elke push de app (ondertekend met `android/signing/`)
+en de server-image met de app erin, en zet die op `ghcr.io/lvos04/uren_leon:latest`.
 
 API (Bearer-token): `GET /api/v1/ping`, `GET /api/v1/days?start=&end=`, `PUT /api/v1/days/{datum}`,
-`GET /api/v1/week/{datum}`, `GET /api/v1/month/{jaar}/{maand}`, `GET /api/v1/print/{jaar}/{maand}.pdf`.
+`GET /api/v1/week/{datum}`, `GET /api/v1/month/{jaar}/{maand}`, `GET /api/v1/print/{jaar}/{maand}.pdf`,
+`GET /api/v1/app-version`, `GET /api/v1/app.apk`.

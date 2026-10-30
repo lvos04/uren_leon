@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Welkom - Uren</title><link rel="stylesheet" href="/static/style.css"><link rel="icon" href="/static/icon.svg"></head>
+<body><main class="login"><div class="card">
+<h1>⏱ Welkom</h1>
+{% if not allowed %}
+<p class="bad">Het wachtwoord kan alleen de eerste keer worden ingesteld vanaf je thuisnetwerk.
+Open deze pagina via het adres van je TrueNAS (bijv. <code>http://192.168.x.x:8085</code>) op een apparaat dat thuis op de wifi zit.</p>
+{% else %}
+<p>Kies een wachtwoord voor de web-app. Hiermee log je later in, ook van buitenaf.</p>
+{% if error %}<p class="bad">{{ error }}</p>{% endif %}
+<form method="post" action="/setup">
+  <label for="naam">Je naam (komt op de print)</label>
+  <input id="naam" type="text" name="naam" style="width:100%;margin-bottom:12px">
+  <label for="pw">Wachtwoord (minstens 8 tekens)</label>
+  <input id="pw" type="password" name="password" required minlength="8" style="width:100%;margin-bottom:12px" autocomplete="new-password">
+  <label for="pw2">Nog een keer</label>
+  <input id="pw2" type="password" name="password2" required style="width:100%;margin-bottom:16px" autocomplete="new-password">
+  <button type="submit" style="width:100%">Opslaan en beginnen</button>
+</form>
+{% endif %}
+</div></main></body></html>

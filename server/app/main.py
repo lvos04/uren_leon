@@ -2,20 +2,21 @@
 from __future__ import annotations
 
 import datetime as dt
+import json
 import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import auth, backup, db, printing
+from . import auth, backup, db, onedrive, printing
 from .calc import (DAGEN, DAGEN_KORT, MAANDEN, build_year, fmt_euro, fmt_hours, get_settings, get_week,
                    weeks_in_year)
 from .export_xlsx import export_workbook
@@ -28,16 +29,27 @@ BASE = Path(__file__).parent
 db.init_db()
 
 
+SCHED = {"s": None}
+
+
 def _start_scheduler():
-    """Dagelijkse backup (standaard 03:00, instelbaar met BACKUP_TIME)."""
+    """Dagelijkse backup op de tijd uit Instellingen."""
     from apscheduler.schedulers.background import BackgroundScheduler
-    from apscheduler.triggers.cron import CronTrigger
-    hh, mm = os.environ.get("BACKUP_TIME", "03:00").split(":")
     sched = BackgroundScheduler(timezone=os.environ.get("TZ", "Europe/Amsterdam"))
-    sched.add_job(backup.run_backup, CronTrigger(hour=int(hh), minute=int(mm)), id="backup",
-                  misfire_grace_time=6 * 3600, coalesce=True)
     sched.start()
+    SCHED["s"] = sched
+    plan_backup()
     return sched
+
+
+def plan_backup():
+    sched = SCHED["s"]
+    if sched is None:
+        return
+    from apscheduler.triggers.cron import CronTrigger
+    hh, mm = backup.get_settings()["backup_time"].split(":")
+    sched.add_job(backup.run_backup, CronTrigger(hour=int(hh), minute=int(mm)), id="backup",
+                  misfire_grace_time=6 * 3600, coalesce=True, replace_existing=True)
 
 
 @asynccontextmanager
@@ -85,6 +97,41 @@ async def _need_login(request: Request, exc):
     return RedirectResponse("/login?next=" + quote(request.url.path), status_code=303)
 
 
+@app.exception_handler(auth.NeedSetup)
+async def _need_setup(request: Request, exc):
+    return RedirectResponse("/setup", status_code=303)
+
+
+# ---------------------------------------------------------------- eerste keer
+@app.get("/setup", response_class=HTMLResponse)
+def setup_form(request: Request):
+    if auth.password_is_set():
+        return RedirectResponse("/login", status_code=303)
+    return page(request, "setup.html", error=None, allowed=auth.is_private_client(request))
+
+
+@app.post("/setup")
+def setup(request: Request, password: str = Form(...), password2: str = Form(...), naam: str = Form("")):
+    if auth.password_is_set():
+        return RedirectResponse("/login", status_code=303)
+    if not auth.is_private_client(request):
+        raise HTTPException(403, "Stel het wachtwoord in vanaf je thuisnetwerk")
+    error = None
+    if len(password) < 8:
+        error = "Kies een wachtwoord van minstens 8 tekens"
+    elif password != password2:
+        error = "De twee wachtwoorden zijn niet gelijk"
+    if error:
+        return page(request, "setup.html", error=error, allowed=True)
+    auth.set_password(password)
+    with db.get_conn() as conn:
+        if naam.strip():
+            db.set_meta(conn, "naam", naam.strip())
+    request.session["ok"] = True
+    return RedirectResponse("/instellingen?msg=" + quote("Welkom! Importeer hieronder je oude Excel-bestand."),
+                            status_code=303)
+
+
 @app.get("/healthz")
 def healthz():
     return {"ok": True}
@@ -93,6 +140,8 @@ def healthz():
 # ---------------------------------------------------------------- login
 @app.get("/login", response_class=HTMLResponse)
 def login_form(request: Request, next: str = "/"):
+    if not auth.password_is_set():
+        return RedirectResponse("/setup", status_code=303)
     return page(request, "login.html", next=next, error=None)
 
 
@@ -235,17 +284,40 @@ def calculator_take(jaar: int = Form(...), maand: int = Form(...), bruto: str = 
 
 
 # ---------------------------------------------------------------- instellingen
+APK_DIR = Path(os.environ.get("APK_DIR", "/srv/apk"))
+
+
+def app_info() -> dict | None:
+    f = APK_DIR / "version.json"
+    if not f.exists() or not (APK_DIR / "uren.apk").exists():
+        return None
+    import json
+    return json.loads(f.read_text())
+
+
+def public_url(request: Request) -> str:
+    with db.get_conn() as conn:
+        u = db.get_meta(conn, "public_url", "")
+    return u or str(request.base_url).rstrip("/")
+
+
+def back(msg: str, anchor: str = "") -> RedirectResponse:
+    return RedirectResponse("/instellingen?msg=" + quote(msg) + (f"#{anchor}" if anchor else ""), status_code=303)
+
+
 @app.get("/instellingen", response_class=HTMLResponse, dependencies=[Depends(auth.require_web)])
-def instellingen(request: Request, jaar: int | None = None, msg: str = "", new_token: str = ""):
+def instellingen(request: Request, jaar: int | None = None, msg: str = ""):
     year = jaar or dt.date.today().year
     with db.get_conn() as conn:
         s = get_settings(conn, year)
         tokens = conn.execute("SELECT id, name, created_at FROM tokens ORDER BY id").fetchall()
         payouts = conn.execute("SELECT * FROM payouts ORDER BY date DESC").fetchall()
         naam = db.get_meta(conn, "naam", "")
+        purl = db.get_meta(conn, "public_url", "")
     return page(request, "instellingen.html", s=s, jaar=year, tokens=tokens, payouts=payouts, naam=naam,
-                msg=msg, new_token=new_token, backup=backup.last_status(), SITUATIES=SITUATIES,
-                rclone=backup.RCLONE_CONF.exists(), remote=backup.RCLONE_REMOTE)
+                msg=msg, backup=backup.last_status(), bset=backup.get_settings(), backups=backup.list_backups(),
+                linked=backup.onedrive_linked(), SITUATIES=SITUATIES, app=app_info(),
+                public_url=purl, guessed_url=str(request.base_url).rstrip("/"))
 
 
 @app.post("/instellingen/jaar", dependencies=[Depends(auth.require_web)])
@@ -262,31 +334,141 @@ def instellingen_jaar(jaar: int = Form(...), contract_hours: str = Form(...), ra
     return RedirectResponse(f"/instellingen?jaar={jaar}&msg=Instellingen+{jaar}+opgeslagen", status_code=303)
 
 
-@app.post("/instellingen/naam", dependencies=[Depends(auth.require_web)])
-def instellingen_naam(naam: str = Form("")):
+@app.post("/instellingen/account", dependencies=[Depends(auth.require_web)])
+def instellingen_account(naam: str = Form(""), public_url_in: str = Form("", alias="public_url")):
+    u = public_url_in.strip().rstrip("/")
+    if u and not u.startswith(("http://", "https://")):
+        u = "https://" + u
     with db.get_conn() as conn:
         db.set_meta(conn, "naam", naam.strip())
-    return RedirectResponse("/instellingen?msg=Naam+opgeslagen", status_code=303)
+        db.set_meta(conn, "public_url", u)
+    return back("Opgeslagen", "account")
 
 
-@app.post("/tokens", dependencies=[Depends(auth.require_web)])
-def token_new(name: str = Form("Telefoon")):
+@app.post("/instellingen/wachtwoord", dependencies=[Depends(auth.require_web)])
+def instellingen_wachtwoord(oud: str = Form(...), nieuw: str = Form(...), nieuw2: str = Form(...)):
+    if not auth.check_password(oud):
+        return back("Huidig wachtwoord klopt niet", "account")
+    if len(nieuw) < 8 or nieuw != nieuw2:
+        return back("Nieuw wachtwoord: minstens 8 tekens en twee keer hetzelfde", "account")
+    auth.set_password(nieuw)
+    return back("Wachtwoord gewijzigd", "account")
+
+
+# ---- telefoon koppelen
+@app.post("/koppel", response_class=HTMLResponse, dependencies=[Depends(auth.require_web)])
+def koppel(request: Request, name: str = Form("Telefoon")):
+    import io
+
+    import qrcode
+    import qrcode.image.svg
     token = auth.create_token(name.strip() or "Telefoon")
-    return RedirectResponse(f"/instellingen?new_token={quote(token)}", status_code=303)
+    url = public_url(request)
+    link = "uren://koppel?" + urlencode({"url": url, "token": token})
+    buf = io.BytesIO()
+    qrcode.make(link, image_factory=qrcode.image.svg.SvgPathImage, box_size=12).save(buf)
+    return page(request, "koppel.html", link=link, qr=buf.getvalue().decode(), url=url, token=token, app=app_info())
 
 
 @app.post("/tokens/{tid}/delete", dependencies=[Depends(auth.require_web)])
 def token_delete(tid: int):
     with db.get_conn() as conn:
         conn.execute("DELETE FROM tokens WHERE id=?", (tid,))
-    return RedirectResponse("/instellingen?msg=Token+verwijderd", status_code=303)
+    return back("Telefoon ontkoppeld", "telefoon")
+
+
+@app.get("/app/uren.apk", dependencies=[Depends(auth.require_web)])
+def apk_download():
+    return _apk_response()
+
+
+def _apk_response():
+    f = APK_DIR / "uren.apk"
+    if not f.exists():
+        raise HTTPException(404, "Geen app meegeleverd in deze versie")
+    return FileResponse(f, media_type="application/vnd.android.package-archive", filename="uren.apk")
+
+
+# ---- backup
+@app.post("/instellingen/backup", dependencies=[Depends(auth.require_web)])
+def instellingen_backup(tijd: str = Form(...), map_: str = Form("UrenBackup", alias="map"), dagen: int = Form(30)):
+    try:
+        backup.save_settings(tijd, map_, dagen)
+    except ValueError as e:
+        return back(str(e), "backup")
+    plan_backup()
+    return back("Backup-instellingen opgeslagen", "backup")
 
 
 @app.post("/backup", dependencies=[Depends(auth.require_web)])
 def backup_now():
     r = backup.run_backup()
-    msg = "Backup gemaakt" if r["ok"] else f"Backup mislukt: {r['error']}"
-    return RedirectResponse("/instellingen?msg=" + quote(msg), status_code=303)
+    if r["ok"] and r["upload"] == "ok":
+        msg = "Backup gemaakt en naar OneDrive gezet"
+    elif r["ok"]:
+        msg = "Backup gemaakt (alleen op de server: OneDrive is niet gekoppeld)"
+    else:
+        msg = f"Backup mislukt: {r['error']}"
+    return back(msg, "backup")
+
+
+@app.get("/backups/{name}", dependencies=[Depends(auth.require_web)])
+def backup_download(name: str):
+    try:
+        f = backup.backup_file(name)
+    except FileNotFoundError:
+        raise HTTPException(404)
+    return FileResponse(f, filename=name)
+
+
+@app.post("/backups/{name}/restore", dependencies=[Depends(auth.require_web)])
+def backup_restore(name: str):
+    try:
+        safety = backup.restore(name)
+    except Exception as e:  # noqa: BLE001
+        return back(f"Terugzetten mislukt: {e}", "backup")
+    return back(f"{name} teruggezet. De gegevens van vóór het terugzetten staan in {safety}.", "backup")
+
+
+# ---- OneDrive
+@app.get("/onedrive", response_class=HTMLResponse, dependencies=[Depends(auth.require_web)])
+def onedrive_page(request: Request):
+    return page(request, "onedrive.html", login_url=None, error=None, linked=backup.onedrive_linked(),
+                folder=backup.get_settings()["backup_folder"])
+
+
+@app.post("/onedrive/start", response_class=HTMLResponse, dependencies=[Depends(auth.require_web)])
+def onedrive_start(request: Request):
+    try:
+        url = onedrive.start()
+        err = None
+    except Exception as e:  # noqa: BLE001
+        url, err = None, str(e)
+    return page(request, "onedrive.html", login_url=url, error=err, linked=backup.onedrive_linked(),
+                folder=backup.get_settings()["backup_folder"])
+
+
+@app.post("/onedrive/finish", response_class=HTMLResponse, dependencies=[Depends(auth.require_web)])
+def onedrive_finish(request: Request, adres: str = Form(...)):
+    try:
+        drive = onedrive.finish(adres)
+    except Exception as e:  # noqa: BLE001
+        return page(request, "onedrive.html", login_url=None, error=str(e), linked=backup.onedrive_linked(),
+                folder=backup.get_settings()["backup_folder"])
+    who = (drive.get("owner") or {}).get("user", {}).get("displayName", "")
+    return back(f"OneDrive gekoppeld{(' (' + who + ')') if who else ''}. Klik op 'Nu backup maken' om te testen.",
+                "backup")
+
+
+@app.post("/onedrive/test", dependencies=[Depends(auth.require_web)])
+def onedrive_test():
+    return back(onedrive.test(), "backup")
+
+
+@app.post("/onedrive/unlink", dependencies=[Depends(auth.require_web)])
+def onedrive_unlink():
+    onedrive.unlink()
+    return back("OneDrive ontkoppeld", "backup")
 
 
 @app.post("/import", dependencies=[Depends(auth.require_web)])
@@ -409,3 +591,13 @@ def api_month(year: int, month: int):
 @app.get(api + "/print/{year}/{month}.pdf", dependencies=[Depends(auth.require_api)])
 def api_print(year: int, month: int):
     return _pdf(year, [month], f"uren-{year}-{month:02d}.pdf")
+
+
+@app.get(api + "/app-version", dependencies=[Depends(auth.require_api)])
+def api_app_version():
+    return app_info() or {}
+
+
+@app.get(api + "/app.apk", dependencies=[Depends(auth.require_api)])
+def api_apk():
+    return _apk_response()

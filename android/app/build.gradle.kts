@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -12,19 +14,23 @@ android {
         applicationId = "nl.leon.uren"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0"
+        // Elke build in GitHub Actions krijgt een hoger nummer, zodat de app updates herkent.
+        val run = (System.getenv("GITHUB_RUN_NUMBER") ?: "0").toInt()
+        versionCode = 1 + run
+        versionName = "1.$run"
     }
 
     signingConfigs {
-        // Release-ondertekening via omgevingsvariabelen (GitHub Actions secrets); anders debug-sleutel.
+        // Vaste sleutel uit android/signing (in de repo), zodat updates altijd over de app heen kunnen.
         create("release") {
-            val ks = System.getenv("UREN_KEYSTORE")
-            if (ks != null && file(ks).exists()) {
-                storeFile = file(ks)
-                storePassword = System.getenv("UREN_KEYSTORE_PASSWORD")
-                keyAlias = System.getenv("UREN_KEY_ALIAS")
-                keyPassword = System.getenv("UREN_KEY_PASSWORD")
+            val props = Properties()
+            val f = rootProject.file("signing/signing.properties")
+            if (f.exists()) {
+                f.inputStream().use { props.load(it) }
+                storeFile = rootProject.file("signing/" + props.getProperty("storeFile"))
+                storePassword = props.getProperty("storePassword")
+                keyAlias = props.getProperty("keyAlias")
+                keyPassword = props.getProperty("keyPassword")
             }
         }
     }
@@ -32,8 +38,7 @@ android {
     buildTypes {
         release {
             isMinifyEnabled = false
-            val rel = signingConfigs.getByName("release")
-            signingConfig = if (rel.storeFile != null) rel else signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
     compileOptions {
@@ -41,7 +46,10 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
     kotlinOptions { jvmTarget = "17" }
-    buildFeatures { compose = true }
+    buildFeatures {
+        compose = true
+        buildConfig = true
+    }
 }
 
 dependencies {

@@ -14,6 +14,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 COPY scripts ./scripts
+# Android-app (door GitHub Actions in server/apk/ gezet), te downloaden via de web-app
+COPY apk/ /srv/apk/
 
 VOLUME /data
 EXPOSE 8080
