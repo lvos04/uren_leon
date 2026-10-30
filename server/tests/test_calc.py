@@ -68,3 +68,39 @@ def test_bruto_netto_redelijk():
     zonder = bruto_netto(3700, 2026, loonheffingskorting=False)
     assert zonder["netto"] < r["netto"]
     assert bruto_netto(0, 2026)["netto"] == 0
+
+
+def test_feestdagen():
+    from app.holidays import easter, holiday_dates
+    d = holiday_dates(2026)
+    assert easter(2026) == dt.date(2026, 4, 5) and easter(2025) == dt.date(2025, 4, 20)
+    assert d["koningsdag"] == dt.date(2026, 4, 27)
+    assert d["hemelvaart"] == dt.date(2026, 5, 14)
+    assert (d["pinksteren1"], d["pinksteren2"]) == (dt.date(2026, 5, 24), dt.date(2026, 5, 25))
+    assert holiday_dates(2025)["koningsdag"] == dt.date(2025, 4, 26)  # 27-4-2025 is zondag
+
+
+def test_standaardfactor_en_naam(conn):
+    from app import holidays
+    w = get_week(conn, 2026, 15)  # 6-4 t/m 12-4: 2e Paasdag op maandag
+    assert w.holiday[0] == "2e Paasdag" and w.default_factor[0] == 2.0
+    assert w.default_factor[6] == 2.0  # zondag
+    assert w.default_factor[2] == 1.0
+    s = holidays.get_settings()
+    s["days"]["pasen2"]["factor"] = 1.5
+    holidays.save_settings(1.0, s["days"])
+    w = get_week(conn, 2026, 15)
+    assert w.default_factor[0] == 1.5 and w.default_factor[6] == 1.0
+
+
+def test_ontbrekende_dagen(conn):
+    # eerste ingevulde dag: ma 5-1-2025; di leeg, wo vakantie, do leeg, vr ingevuld
+    put(conn, "2025-01-06", 8)
+    put(conn, "2025-01-08", None, vakantie=1)
+    put(conn, "2025-01-10", 8)
+    Y = build_year(conn, 2025)
+    missing = [d.isoformat() for _, d in Y["missing"]]
+    assert "2025-01-07" in missing and "2025-01-09" in missing
+    assert "2025-01-08" not in missing and "2025-01-11" not in missing  # vakantie / zaterdag
+    assert "2025-04-21" not in missing  # 2e Paasdag
+    assert "2025-01-01" not in missing  # voor de eerste ingevulde dag

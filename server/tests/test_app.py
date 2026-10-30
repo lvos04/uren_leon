@@ -126,7 +126,8 @@ def test_backup_instellingen_en_terugzetten(conn):
     c = client()
     login(c)
     c.post("/instellingen/backup", data={"tijd": "4:15", "map": "Werk/Uren", "dagen": "10"})
-    assert backup.get_settings() == {"backup_time": "04:15", "backup_folder": "Werk/Uren", "backup_keep_days": "10"}
+    assert backup.get_settings() == {"backup_time": "04:15", "backup_folder": "Werk/Uren", "backup_keep_days": "10",
+                                     "month_pdf": "0"}
     conn.execute("INSERT INTO days(date, hours, updated_at) VALUES('2026-10-05', 9, 'x')")
     conn.commit()
     r = backup.run_backup()
@@ -167,3 +168,80 @@ def test_onedrive_pagina(conn):
     import pytest
     with pytest.raises(RuntimeError, match="verlopen"):
         onedrive.finish("http://localhost:53682/?code=abc&state=x")
+
+
+def test_inlogblokkade(conn):
+    from app import auth
+    auth._fails.clear()
+    c = client()
+    login(c)
+    c2 = client()
+    for _ in range(5):
+        assert "klopt niet" in c2.post("/login", data={"password": "fout"}).text
+    r = c2.post("/login", data={"password": "test-wachtwoord"}, follow_redirects=False)
+    assert "Te veel foute pogingen" in r.text
+    # vanaf een ander adres (via proxy) kan het nog wel
+    r = c2.post("/login", data={"password": "test-wachtwoord"}, headers={"X-Forwarded-For": "10.0.0.9"},
+                follow_redirects=False)
+    assert r.status_code == 303
+    auth._fails.clear()
+
+
+def test_secure_cookie_via_https(conn):
+    from app import auth
+    auth.set_password("test-wachtwoord")
+    r = client().post("/login", data={"password": "test-wachtwoord"}, follow_redirects=False,
+                      headers={"X-Forwarded-Proto": "https"})
+    from fastapi.testclient import TestClient
+    from app.main import app
+    r = TestClient(app, base_url="https://testserver").post("/login", data={"password": "test-wachtwoord"},
+                                                            follow_redirects=False)
+    assert "secure" in r.headers["set-cookie"].lower()
+    r = client().post("/login", data={"password": "test-wachtwoord"}, follow_redirects=False)
+    assert "secure" not in r.headers["set-cookie"].lower()
+
+
+def test_feestdagen_api_en_instellingen(conn):
+    c = client()
+    login(c)
+    assert "2e Paasdag" in c.get("/week/2026/15").text
+    j = c.get("/api/v1/holidays", params={"start": "2026-01-01", "end": "2026-12-31"}).json()
+    assert j["sunday_factor"] == 2 and {"date": "2026-04-27", "name": "Koningsdag", "factor": 2.0} in j["holidays"]
+    c.post("/instellingen/feestdagen", data={"sunday_factor": "1.5", "on_pasen1": "1", "f_pasen1": "2"})
+    j = c.get("/api/v1/holidays", params={"start": "2026-01-01", "end": "2026-12-31"}).json()
+    assert j["sunday_factor"] == 1.5 and [h["name"] for h in j["holidays"]] == ["1e Paasdag"]
+
+
+def test_ontbrekend_in_jaaroverzicht(conn):
+    conn.execute("INSERT INTO days(date, hours, updated_at) VALUES('2026-03-02', 8, 'x')")
+    conn.commit()
+    c = client()
+    login(c)
+    t = c.get("/jaar/2026").text
+    assert "werkdagen zonder uren" in t and "di 03-03" in t
+    assert "werkdagen zonder uren" in c.get("/maand/2026/3").text
+
+
+def test_maand_pdf_versturen(conn, tmp_path):
+    from app import backup
+    c = client()
+    login(c)
+    r = c.post("/maand-pdf", data={"maand": "2026-10"}, follow_redirects=False)
+    assert "uren-2026-10.pdf" in r.headers["location"]
+    assert c.get("/maandoverzichten/uren-2026-10.pdf").content[:4] == b"%PDF"
+    assert backup.last_month_pdf()["upload"] == "OneDrive niet gekoppeld"
+    # met een (nep) OneDrive: rclone krijgt de opdracht
+    calls = []
+
+    class P:
+        returncode = 0
+        stderr = ""
+
+    orig_linked, orig_rclone = backup.onedrive_linked, backup.rclone
+    backup.onedrive_linked = lambda: True
+    backup.rclone = lambda *a, **k: calls.append(a) or P()
+    try:
+        r = backup.send_month_pdf(2026, 9)
+    finally:
+        backup.onedrive_linked, backup.rclone = orig_linked, orig_rclone
+    assert r["upload"] == "ok" and calls[0][0] == "copy" and calls[0][2].endswith("UrenBackup/Maandoverzichten")

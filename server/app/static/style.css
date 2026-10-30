@@ -43,3 +43,8 @@ label{display:block;font-size:.85rem;color:var(--muted);margin-bottom:3px}
 code.token{display:block;word-break:break-all;background:var(--bg);padding:10px;border-radius:8px;border:1px solid var(--line);user-select:all}
 .login{max-width:360px;margin:12vh auto}
 @media (max-width:640px){.hide-sm{display:none}main{padding:12px}}
+.hol{font-size:.75rem;color:var(--warn)}
+.hol.warn{color:var(--danger)}
+tr.miss td{background:color-mix(in srgb,var(--danger) 8%,transparent)}
+.warnbox{background:color-mix(in srgb,var(--warn) 14%,var(--card));border:1px solid color-mix(in srgb,var(--warn) 40%,transparent)}
+.warnbox a{white-space:nowrap}

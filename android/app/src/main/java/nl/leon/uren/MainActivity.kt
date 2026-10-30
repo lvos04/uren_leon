@@ -185,9 +185,16 @@ fun DayScreen(date: LocalDate, onDate: (LocalDate) -> Unit, snack: SnackbarHostS
     var day by remember(date) { mutableStateOf(store.get(date)) }
     var hoursText by remember(date) { mutableStateOf(fmtHours(day.hours)) }
     var note by remember(date) { mutableStateOf(day.note ?: "") }
-    // Zondag standaard 2x als er nog niets is ingevuld
+    val hol = remember { Holidays(ctx) }
+    val holiday = remember(date) { hol.get(date) }
+    // Zondag/feestdag: standaard factor (instelbaar in de web-app) als er nog niets is ingevuld
     LaunchedEffect(date) {
-        if (day.isEmpty && date.dayOfWeek == DayOfWeek.SUNDAY) day = day.copy(factor = 2.0)
+        if (day.isEmpty) day = day.copy(factor = hol.defaultFactor(date))
+    }
+    val yesterday = remember(date, day) {
+        var d = LocalDate.now().minusDays(1)
+        while (d.dayOfWeek.value > 5) d = d.minusDays(1)
+        store.get(d).takeIf { isMissing(it, store.firstDate(), hol.get(d)) }?.date
     }
 
     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -205,6 +212,19 @@ fun DayScreen(date: LocalDate, onDate: (LocalDate) -> Unit, snack: SnackbarHostS
     }
     if (date != LocalDate.now()) {
         TextButton({ onDate(LocalDate.now()) }, Modifier.fillMaxWidth()) { Text("Naar vandaag") }
+    }
+    holiday?.let {
+        Text("Feestdag: ${it.name}", Modifier.fillMaxWidth(), textAlign = TextAlign.Center,
+            color = MaterialTheme.colorScheme.tertiary, style = MaterialTheme.typography.titleSmall)
+    }
+    if (yesterday != null && yesterday != date) {
+        Card(Modifier.fillMaxWidth()) {
+            Row(Modifier.padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text("${yesterday.format(DAY_FMT).replaceFirstChar { it.uppercase() }} is nog niet ingevuld",
+                    Modifier.weight(1f), color = MaterialTheme.colorScheme.error)
+                TextButton({ onDate(yesterday) }) { Text("Invullen") }
+            }
+        }
     }
 
     Card(Modifier.fillMaxWidth()) {
@@ -275,6 +295,8 @@ fun WeekScreen(anchor: LocalDate, onOpenDay: (LocalDate) -> Unit) {
     var refresh by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
     val days = remember(monday, refresh) { store.range(monday, monday.plusDays(6)) }
+    val hol = remember { Holidays(ctx) }
+    val first = remember(refresh) { store.firstDate() }
     val total = days.sumOf { it.weighted }
     val worked = days.sumOf { it.hours ?: 0.0 }
     val over = (total - prefs.contractHours).coerceAtLeast(0.0)
@@ -294,12 +316,17 @@ fun WeekScreen(anchor: LocalDate, onOpenDay: (LocalDate) -> Unit) {
                 ) {
                     Text(d.date.dayOfWeek.getDisplayName(TextStyle.SHORT, NL) + " " + d.date.dayOfMonth + "-" + d.date.monthValue,
                         Modifier.width(90.dp), fontWeight = if (d.date == LocalDate.now()) FontWeight.Bold else FontWeight.Normal)
+                    val h = hol.get(d.date)
+                    val missing = isMissing(d, first, h)
                     Text(buildString {
+                        if (missing) append("! nog invullen ")
+                        h?.let { append(it.name + " ") }
                         if (d.storing) append("S ")
                         if (d.vakantie > 0) append(if (d.vakantie == 1.0) "V " else "V½ ")
                         if (d.factor != 1.0) append(if (d.factor == 2.0) "2× " else "1,5× ")
                         if (d.dirty) append("•")
-                    }, Modifier.weight(1f), color = MaterialTheme.colorScheme.tertiary)
+                    }, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall,
+                        color = if (missing) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.tertiary)
                     Text(fmtHours(d.hours), style = MaterialTheme.typography.titleMedium)
                 }
             }
@@ -396,6 +423,10 @@ fun SettingsScreen(snack: SnackbarHostState) {
     var remOn by remember { mutableStateOf(prefs.reminderOn) }
     var remH by remember { mutableIntStateOf(prefs.reminderHour) }
     var remM by remember { mutableIntStateOf(prefs.reminderMinute) }
+    var rem2On by remember { mutableStateOf(prefs.reminder2On) }
+    var rem2H by remember { mutableIntStateOf(prefs.reminder2Hour) }
+    var rem2M by remember { mutableIntStateOf(prefs.reminder2Minute) }
+    var skipHol by remember { mutableStateOf(prefs.skipHolidays) }
 
     Text("Server", style = MaterialTheme.typography.titleLarge)
     if (!prefs.configured) Card(Modifier.fillMaxWidth()) {
@@ -433,7 +464,21 @@ fun SettingsScreen(snack: SnackbarHostState) {
             remH = h; remM = m; prefs.reminderHour = h; prefs.reminderMinute = m; Reminder.schedule(ctx)
         }, remH, remM, true).show()
     }, enabled = remOn) { Text("Tijd: %02d:%02d".format(remH, remM)) }
-    Text("Je krijgt geen melding als je die dag al uren of vakantie hebt ingevuld.", style = MaterialTheme.typography.bodySmall)
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("Tweede herinnering als het dan nog leeg is", Modifier.weight(1f))
+        Switch(rem2On, { rem2On = it; prefs.reminder2On = it; Reminder.schedule(ctx) }, enabled = remOn)
+    }
+    OutlinedButton({
+        TimePickerDialog(ctx, { _, h, m ->
+            rem2H = h; rem2M = m; prefs.reminder2Hour = h; prefs.reminder2Minute = m; Reminder.schedule(ctx)
+        }, rem2H, rem2M, true).show()
+    }, enabled = remOn && rem2On) { Text("Tijd: %02d:%02d".format(rem2H, rem2M)) }
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Text("Geen herinnering op feestdagen", Modifier.weight(1f))
+        Switch(skipHol, { skipHol = it; prefs.skipHolidays = it; Reminder.schedule(ctx) })
+    }
+    Text("Je krijgt geen melding als je die dag al uren of vakantie hebt ingevuld. In de melding kun je met één tik " +
+        "je uren opslaan of ze intypen.", style = MaterialTheme.typography.bodySmall)
     OutlinedButton({ Reminder.notify(ctx) }) { Text("Test melding") }
     Text("App-versie ${BuildConfig.VERSION_NAME}", style = MaterialTheme.typography.bodySmall)
 }

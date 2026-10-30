@@ -6,6 +6,10 @@
   <h1><a href="/jaar/{{ Y.year - 1 }}">‹</a> {{ Y.year }} <a href="/jaar/{{ Y.year + 1 }}">›</a></h1>
   <div class="row"><a class="btn sec" href="/print/{{ Y.year }}.pdf">Print hele jaar (PDF)</a></div>
 </div>
+{% if Y.missing %}{% set ms = Y.missing %}
+<div class="msg warnbox">⚠ {{ ms|length }} werkdag{{ 'en' if ms|length != 1 else '' }} zonder uren:
+{% for w, d in ms[:8] %}<a href="/week/{{ w.iso_year }}/{{ w.week }}">{{ DAGEN_KORT[d.weekday()] }} {{ d.strftime("%d-%m") }}</a>{{ ", " if not loop.last }}{% endfor %}{% if ms|length > 8 %} …{% endif %}</div>
+{% endif %}
 <div class="grid">
   <div class="stat"><div class="l">Totaal uren</div><div class="v">{{ t.uren|uur }}</div></div>
   <div class="stat"><div class="l">Overuren</div><div class="v">{{ t.overuren|uur }}</div></div>

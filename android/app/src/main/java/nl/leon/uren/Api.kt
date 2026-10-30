@@ -73,6 +73,10 @@ class Api(private val prefs: Prefs) {
         JSONObject(open("/month/$year/$month").body())
     }
 
+    suspend fun holidays(start: LocalDate, end: LocalDate): JSONObject = withContext(Dispatchers.IO) {
+        JSONObject(open("/holidays?start=$start&end=$end").body())
+    }
+
     suspend fun appVersion(): JSONObject = withContext(Dispatchers.IO) {
         JSONObject(open("/app-version").body())
     }

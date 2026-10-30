@@ -12,6 +12,8 @@ from __future__ import annotations
 import datetime as dt
 from dataclasses import dataclass, field
 
+from . import holidays
+
 MAANDEN = ["januari", "februari", "maart", "april", "mei", "juni", "juli",
            "augustus", "september", "oktober", "november", "december"]
 DAGEN = ["Maandag", "Dinsdag", "Woensdag", "Donderdag", "Vrijdag", "Zaterdag", "Zondag"]
@@ -59,6 +61,13 @@ class Week:
     storing_extra: int = 0
     vakantie_extra: float = 0.0
     contract: float = 40.0
+    holiday: list = field(default_factory=lambda: [None] * 7)        # naam van de feestdag of None
+    default_factor: list = field(default_factory=lambda: [1.0] * 7)  # voorinstelling (zondag/feestdag)
+    missing: list = field(default_factory=lambda: [False] * 7)       # werkdag zonder uren (tot gisteren)
+
+    @property
+    def missing_dates(self) -> list:
+        return [d for d, m in zip(self.dates, self.missing) if m]
 
     @property
     def total(self) -> float:
@@ -148,6 +157,11 @@ def build_weeks(conn, iso_year: int, settings: dict | None = None) -> list[Week]
     end = dt.date.fromisocalendar(iso_year, n, 7)
     days = load_days(conn, start, end)
     meta = {r["week"]: r for r in conn.execute("SELECT * FROM weeks WHERE iso_year=?", (iso_year,))}
+    hset = holidays.get_settings(conn)
+    hol = holidays.holidays_between(start, end, hset)
+    first = conn.execute("SELECT min(date) FROM days WHERE hours IS NOT NULL").fetchone()[0]
+    first = dt.date.fromisoformat(first) if first else None
+    yesterday = dt.date.today() - dt.timedelta(days=1)
     out = []
     for w in range(1, n + 1):
         dates = week_dates(iso_year, w)
@@ -165,7 +179,19 @@ def build_weeks(conn, iso_year: int, settings: dict | None = None) -> list[Week]
             storing_extra=m["storing_extra"] if m is not None else 0,
             vakantie_extra=m["vakantie_extra"] if m is not None else 0,
             contract=settings["contract_hours"],
+            holiday=[hol[d]["name"] if d in hol else None for d in dates],
+            default_factor=[holidays.default_factor(d, hset, hol) for d in dates],
         ))
+        W = out[-1]
+        miss = [first is not None and first <= d <= yesterday and d.weekday() < 5 and W.hours[i] is None
+                and not W.vakantie[i] and d not in hol for i, d in enumerate(dates)]
+        # vakantiedagen die alleen per week bekend zijn (Excel-import) dekken ontbrekende dagen af
+        extra = int(W.vakantie_extra + 0.5)
+        for i in range(7):
+            if extra and miss[i]:
+                miss[i] = False
+                extra -= 1
+        W.missing = miss
     return out
 
 
@@ -219,7 +245,8 @@ def build_year(conn, year: int) -> dict:
         uitbetaald=round(paid, 2),
         nog_te_goed=round(ot_euro + storing_euro - paid, 2) if payouts else None,
     )
-    return dict(year=year, settings=s, weeks=weeks, months=months, payouts=payouts, totals=totals)
+    missing = [(w, d) for w in weeks for d in w.missing_dates]
+    return dict(year=year, settings=s, weeks=weeks, months=months, payouts=payouts, totals=totals, missing=missing)
 
 
 def fmt_hours(v) -> str:

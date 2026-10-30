@@ -63,6 +63,44 @@ def is_private_client(request: Request) -> bool:
         return hosts == ["testclient"]
 
 
+# ---------------------------------------------------------------- blokkeren na te veel fouten
+LOCK_SECONDS = 15 * 60
+MAX_FAILS = {"web": 5, "api": 10}
+_fails: dict[tuple, list] = {}
+
+
+def client_ip(request: Request) -> str:
+    """Het adres dat de reverse proxy als laatste toevoegt (een bezoeker kan dat niet vervalsen)."""
+    xff = [h.strip() for h in request.headers.get("x-forwarded-for", "").split(",") if h.strip()]
+    if xff:
+        return xff[-1]
+    return request.client.host if request.client else "?"
+
+
+def _recent(key, now):
+    times = [t for t in _fails.get(key, []) if now - t < LOCK_SECONDS]
+    _fails[key] = times
+    return times
+
+
+def locked_for(request: Request, kind: str = "web") -> int:
+    """Seconden dat inloggen nog geblokkeerd is (0 = niet geblokkeerd)."""
+    now = time.time()
+    limit = MAX_FAILS[kind]
+    times = _recent((kind, client_ip(request)), now)
+    if len(times) >= limit:
+        return int(LOCK_SECONDS - (now - times[-limit])) + 1
+    return 0
+
+
+def record_fail(request: Request, kind: str = "web") -> None:
+    _fails.setdefault((kind, client_ip(request)), []).append(time.time())
+
+
+def clear_fails(request: Request, kind: str = "web") -> None:
+    _fails.pop((kind, client_ip(request)), None)
+
+
 # ---------------------------------------------------------------- tokens
 def _hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
@@ -95,10 +133,13 @@ def require_web(request: Request):
 
 def require_api(request: Request):
     """API: Bearer-token, of ingelogde browser-sessie."""
+    if is_logged_in(request):
+        return
     auth = request.headers.get("authorization", "")
     if auth.lower().startswith("bearer ") and token_valid(auth[7:].strip()):
         return
-    if is_logged_in(request):
-        return
+    if locked_for(request, "api"):
+        raise HTTPException(status_code=429, detail="Te veel foute pogingen, probeer het later opnieuw")
+    record_fail(request, "api")
     time.sleep(0.5)
     raise HTTPException(status_code=401, detail="Ongeldig token")

@@ -8,6 +8,9 @@
   <div class="row"><a class="btn" href="/print/{{ Y.year }}/{{ M.month }}.pdf">🖨 Print (PDF)</a><a class="btn sec" href="/print/{{ Y.year }}/{{ M.month }}">Voorbeeld</a></div>
 </div>
 {% if saved %}<div class="msg">Opgeslagen.</div>{% endif %}
+{% set ms = Y.missing|selectattr(0, "in", M.weeks)|list %}
+{% if ms %}<div class="msg warnbox">⚠ {{ ms|length }} werkdag{{ 'en' if ms|length != 1 else '' }} zonder uren in deze maand:
+{% for w, d in ms %}<a href="/week/{{ w.iso_year }}/{{ w.week }}">{{ DAGEN_KORT[d.weekday()] }} {{ d.strftime("%d-%m") }}</a>{{ ", " if not loop.last }}{% endfor %}</div>{% endif %}
 <div class="grid">
   <div class="stat"><div class="l">Uren</div><div class="v">{{ M.uren|uur }}</div>{% if M.gewerkt != M.uren %}<div class="l">gewerkt {{ M.gewerkt|uur }} (rest = toeslag zon-/feestdag)</div>{% endif %}</div>
   <div class="stat"><div class="l">Overuren</div><div class="v">{{ M.overuren|uur }}</div></div>

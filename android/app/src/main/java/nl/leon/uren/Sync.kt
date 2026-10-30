@@ -62,6 +62,13 @@ object Sync {
         val start = LocalDate.now().minusWeeks(8)
         store.mergeFromServer(start, end, api.days(start, end))
         runCatching { prefs.contractHours = api.week(LocalDate.now()).optDouble("contract", 40.0) }
+        runCatching {
+            val hs = LocalDate.now().withDayOfYear(1).minusYears(1)
+            val he = LocalDate.now().withDayOfYear(1).plusYears(2).minusDays(1)
+            val h = Holidays(context)
+            h.save(api.holidays(hs, he))
+            h.saveRange(hs, he)
+        }
         prefs.lastSync = nowIso()
         prefs.lastSyncError = ""
     }

@@ -11,11 +11,15 @@
 <thead><tr><th>Dag</th><th>Uren</th><th title="Storingsdienst">Storing</th><th title="Uren van deze dag tellen 1x, 1,5x of 2x mee (zon-/feestdag)">Telt</th><th title="Vakantiedag (1 of 0,5)">Vakantie</th><th class="l hide-sm">Notitie</th></tr></thead>
 <tbody>
 {% for d in W.dates %}{% set i = loop.index0 %}
-<tr{% if d == today %} class="cur"{% endif %}>
-  <td>{{ DAGEN_KORT[i] }} <span class="muted">{{ d.strftime("%d-%m") }}</span></td>
+{% set empty = W.hours[i] is none and not W.storing[i] and not W.vakantie[i] %}
+{% set fac = W.default_factor[i] if empty else W.factor[i] %}
+<tr class="{% if d == today %}cur{% endif %}{% if W.missing[i] %} miss{% endif %}">
+  <td>{{ DAGEN_KORT[i] }} <span class="muted">{{ d.strftime("%d-%m") }}</span>
+    {% if W.holiday[i] %}<div class="hol">{{ W.holiday[i] }}</div>{% endif %}
+    {% if W.missing[i] %}<div class="hol warn">nog niet ingevuld</div>{% endif %}</td>
   <td><input class="h" style="width:4.2em" type="text" inputmode="decimal" name="h{{ i }}" value="{{ W.hours[i]|uur }}"></td>
   <td style="text-align:center"><input type="checkbox" name="s{{ i }}" value="1" {% if W.storing[i] %}checked{% endif %}></td>
-  <td><select name="f{{ i }}">{% for f, lbl in [(1, '1×'), (1.5, '1,5×'), (2, '2×')] %}<option value="{{ f }}" {% if W.factor[i] == f %}selected{% endif %}>{{ lbl }}</option>{% endfor %}</select></td>
+  <td><select name="f{{ i }}">{% for f, lbl in [(1, '1×'), (1.5, '1,5×'), (2, '2×')] %}<option value="{{ f }}" {% if fac == f %}selected{% endif %}>{{ lbl }}</option>{% endfor %}</select></td>
   <td><select name="v{{ i }}"><option value="0"></option><option value="1" {% if W.vakantie[i] == 1 %}selected{% endif %}>hele dag</option><option value="0.5" {% if W.vakantie[i] == 0.5 %}selected{% endif %}>halve dag</option></select></td>
   <td class="l hide-sm"><input type="text" name="n{{ i }}" value="{{ notes.get(d.isoformat()) or '' }}" style="width:100%"></td>
 </tr>

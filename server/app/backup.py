@@ -22,7 +22,9 @@ RCLONE_CONF = Path(os.environ.get("RCLONE_CONFIG", str(db.DATA_DIR / "rclone" / 
 REMOTE_NAME = "onedrive"
 NAME_RE = re.compile(r"^uren-\d{4}-\d{2}-\d{2}(-\d{6})?\.(db|xlsx)$")
 
-DEFAULTS = {"backup_time": "03:00", "backup_folder": "UrenBackup", "backup_keep_days": "30"}
+DEFAULTS = {"backup_time": "03:00", "backup_folder": "UrenBackup", "backup_keep_days": "30", "month_pdf": "1"}
+MONTH_DIR = db.DATA_DIR / "maandoverzichten"
+MONTH_RE = re.compile(r"^uren-\d{4}-\d{2}\.pdf$")
 
 
 def get_settings() -> dict:
@@ -30,7 +32,7 @@ def get_settings() -> dict:
         return {k: db.get_meta(conn, k, v) for k, v in DEFAULTS.items()}
 
 
-def save_settings(time: str, folder: str, keep_days: int) -> None:
+def save_settings(time: str, folder: str, keep_days: int, month_pdf: bool = True) -> None:
     hh, mm = time.split(":")
     t = f"{int(hh):02d}:{int(mm):02d}"
     folder = folder.strip().strip("/") or "UrenBackup"
@@ -40,6 +42,7 @@ def save_settings(time: str, folder: str, keep_days: int) -> None:
         db.set_meta(conn, "backup_time", t)
         db.set_meta(conn, "backup_folder", folder)
         db.set_meta(conn, "backup_keep_days", str(max(1, int(keep_days))))
+        db.set_meta(conn, "month_pdf", "1" if month_pdf else "0")
 
 
 def onedrive_linked() -> bool:
@@ -169,3 +172,57 @@ def restore(name: str) -> str:
         conn.executemany("INSERT INTO tokens(name, token_hash, created_at) VALUES(?,?,?)",
                          [tuple(t) for t in tokens])
     return safety.name
+
+
+# ---------------------------------------------------------------- maandoverzicht als PDF
+def send_month_pdf(year: int, month: int) -> dict:
+    """Maak de maand-PDF en zet hem (als OneDrive gekoppeld is) in <backup-map>/Maandoverzichten."""
+    from .printing import render_pdf
+    MONTH_DIR.mkdir(parents=True, exist_ok=True)
+    f = MONTH_DIR / f"uren-{year}-{month:02d}.pdf"
+    result = dict(time=dt.datetime.now().isoformat(timespec="seconds"), file=f.name, upload=None, error=None)
+    try:
+        conn = db.connect()
+        try:
+            f.write_bytes(render_pdf(conn, year, [month]))
+        finally:
+            conn.close()
+        if onedrive_linked():
+            p = rclone("copy", str(f), remote_path() + "/Maandoverzichten")
+            if p.returncode != 0:
+                raise RuntimeError("OneDrive: " + (p.stderr.strip().splitlines() or ["onbekende fout"])[-1])
+            result["upload"] = "ok"
+        else:
+            result["upload"] = "OneDrive niet gekoppeld"
+    except Exception as e:  # noqa: BLE001
+        log.exception("maandoverzicht mislukt")
+        result["error"] = str(e)
+    with db.get_conn() as conn:
+        db.set_meta(conn, "last_month_pdf", json.dumps(result))
+    return result
+
+
+def send_previous_month() -> dict | None:
+    if get_settings()["month_pdf"] != "1":
+        return None
+    first = dt.date.today().replace(day=1)
+    prev = first - dt.timedelta(days=1)
+    return send_month_pdf(prev.year, prev.month)
+
+
+def last_month_pdf() -> dict | None:
+    with db.get_conn() as conn:
+        v = db.get_meta(conn, "last_month_pdf")
+    return json.loads(v) if v else None
+
+
+def list_month_pdfs() -> list[str]:
+    if not MONTH_DIR.exists():
+        return []
+    return sorted((f.name for f in MONTH_DIR.iterdir() if MONTH_RE.match(f.name)), reverse=True)
+
+
+def month_pdf_file(name: str) -> Path:
+    if not MONTH_RE.match(name) or not (MONTH_DIR / name).exists():
+        raise FileNotFoundError(name)
+    return MONTH_DIR / name

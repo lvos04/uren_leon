@@ -18,7 +18,7 @@ data class Day(
     val updatedAt: String = nowIso(),
     val dirty: Boolean = false,
 ) {
-    val isEmpty get() = hours == null && !storing && vakantie == 0.0 && factor == 1.0 && note.isNullOrBlank()
+    val isEmpty get() = hours == null && !storing && vakantie == 0.0 && note.isNullOrBlank()
     val weighted get() = (hours ?: 0.0) * factor
 
     fun toJson(): JSONObject = JSONObject().apply {
@@ -97,6 +97,10 @@ class DayStore(context: Context) {
         save(m)
     }
 
+    /** Vroegste datum waarvan iets bekend is (voor 'nog niet ingevuld'). */
+    @Synchronized
+    fun firstDate(): LocalDate? = load().values.filter { it.hours != null }.minOfOrNull { it.date }
+
     @Synchronized
     fun dirty(): List<Day> = load().values.filter { it.dirty }
 
@@ -154,6 +158,18 @@ class Prefs(context: Context) {
     var reminderMinute: Int
         get() = p.getInt("rem_m", 0)
         set(v) = p.edit().putInt("rem_m", v).apply()
+    var reminder2On: Boolean
+        get() = p.getBoolean("rem2_on", true)
+        set(v) = p.edit().putBoolean("rem2_on", v).apply()
+    var reminder2Hour: Int
+        get() = p.getInt("rem2_h", 21)
+        set(v) = p.edit().putInt("rem2_h", v).apply()
+    var reminder2Minute: Int
+        get() = p.getInt("rem2_m", 30)
+        set(v) = p.edit().putInt("rem2_m", v).apply()
+    var skipHolidays: Boolean
+        get() = p.getBoolean("skip_hol", true)
+        set(v) = p.edit().putBoolean("skip_hol", v).apply()
     var contractHours: Double
         get() = p.getFloat("contract", 40f).toDouble()
         set(v) = p.edit().putFloat("contract", v.toFloat()).apply()

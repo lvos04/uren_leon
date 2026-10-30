@@ -49,3 +49,41 @@ class PairLinkTest {
         assertEquals(null, parsePairLink(null))
     }
 }
+
+class HolidayTest {
+    @Test fun pasenEnFeestdagenZelfdeAlsServer() {
+        assertEquals(java.time.LocalDate.of(2026, 4, 5), HolidayCalc.easter(2026))
+        assertEquals(java.time.LocalDate.of(2025, 4, 20), HolidayCalc.easter(2025))
+        val h = HolidayCalc.defaults(2026).associate { it.name to it.date.toString() }
+        assertEquals("2026-04-27", h["Koningsdag"])
+        assertEquals("2026-05-14", h["Hemelvaartsdag"])
+        assertEquals("2026-05-25", h["2e Pinksterdag"])
+        assertEquals("2025-04-26", HolidayCalc.defaults(2025).first { it.name == "Koningsdag" }.date.toString())
+    }
+
+    @Test fun ontbrekendeDag() {
+        val today = java.time.LocalDate.of(2026, 10, 30)
+        val first = java.time.LocalDate.of(2026, 1, 1)
+        val di = Day(java.time.LocalDate.of(2026, 10, 27))
+        assertEquals(true, isMissing(di, first, null, today))
+        assertEquals(false, isMissing(di.copy(vakantie = 1.0), first, null, today))
+        assertEquals(false, isMissing(Day(java.time.LocalDate.of(2026, 10, 25)), first, null, today)) // zondag
+        assertEquals(false, isMissing(Day(today), first, null, today)) // vandaag nog niet
+    }
+}
+
+class TweeHerinneringenTest {
+    private val times = listOf(java.time.LocalTime.of(20, 0), java.time.LocalTime.of(21, 30))
+
+    @Test fun naEersteKomtTweede() {
+        assertEquals(LocalDateTime.of(2026, 10, 30, 21, 30),
+            Reminder.nextTrigger(LocalDateTime.of(2026, 10, 30, 20, 1), times))
+    }
+
+    @Test fun feestdagWordtOvergeslagen() {
+        // za 31-10 overslaan (pretend feestdag), zondag sowieso -> maandag 20:00
+        val skip = { d: java.time.LocalDate -> d == java.time.LocalDate.of(2026, 10, 31) }
+        assertEquals(LocalDateTime.of(2026, 11, 2, 20, 0),
+            Reminder.nextTrigger(LocalDateTime.of(2026, 10, 30, 22, 0), times, skip))
+    }
+}

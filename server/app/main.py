@@ -16,7 +16,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 from starlette.middleware.sessions import SessionMiddleware
 
-from . import auth, backup, db, onedrive, printing
+from . import auth, backup, db, holidays, onedrive, printing
 from .calc import (DAGEN, DAGEN_KORT, MAANDEN, build_year, fmt_euro, fmt_hours, get_settings, get_week,
                    weeks_in_year)
 from .export_xlsx import export_workbook
@@ -50,6 +50,8 @@ def plan_backup():
     hh, mm = backup.get_settings()["backup_time"].split(":")
     sched.add_job(backup.run_backup, CronTrigger(hour=int(hh), minute=int(mm)), id="backup",
                   misfire_grace_time=6 * 3600, coalesce=True, replace_existing=True)
+    sched.add_job(backup.send_previous_month, CronTrigger(day=1, hour=int(hh), minute=(int(mm) + 15) % 60),
+                  id="maand-pdf", misfire_grace_time=24 * 3600, coalesce=True, replace_existing=True)
 
 
 @asynccontextmanager
@@ -63,12 +65,27 @@ async def lifespan(_app):
 app = FastAPI(title="Uren", docs_url=None, redoc_url=None, lifespan=lifespan)
 app.add_middleware(SessionMiddleware, secret_key=db.session_secret(), session_cookie="uren_sessie",
                    max_age=60 * 60 * 24 * 90, same_site="lax",
-                   https_only=os.environ.get("SESSION_HTTPS_ONLY", "0") == "1")
+                   https_only=False)
+@app.middleware("http")
+async def secure_cookie_over_https(request: Request, call_next):
+    """Achter de reverse proxy (https) het sessiecookie als Secure markeren; thuis via http blijft het werken."""
+    response = await call_next(request)
+    if request.url.scheme == "https":
+        cookies = response.headers.getlist("set-cookie")
+        if cookies:
+            del response.headers["set-cookie"]
+            for c in cookies:
+                if "secure" not in c.lower():
+                    c += "; Secure"
+                response.headers.append("set-cookie", c)
+    return response
+
+
 app.mount("/static", StaticFiles(directory=BASE / "static"), name="static")
 templates = Jinja2Templates(directory=BASE / "templates")
 templates.env.filters["uur"] = fmt_hours
 templates.env.filters["euro"] = fmt_euro
-templates.env.globals.update(MAANDEN=MAANDEN, DAGEN=DAGEN, DAGEN_KORT=DAGEN_KORT)
+templates.env.globals.update(MAANDEN=MAANDEN, DAGEN=DAGEN, DAGEN_KORT=DAGEN_KORT, timedelta1=dt.timedelta(days=1))
 
 
 def now_iso() -> str:
@@ -147,8 +164,14 @@ def login_form(request: Request, next: str = "/"):
 
 @app.post("/login")
 def login(request: Request, password: str = Form(...), next: str = Form("/")):
+    wait = auth.locked_for(request)
+    if wait:
+        return page(request, "login.html", next=next,
+                    error=f"Te veel foute pogingen. Probeer het over {wait // 60 + 1} minuten opnieuw.")
     if not auth.check_password(password):
+        auth.record_fail(request)
         return page(request, "login.html", next=next, error="Wachtwoord klopt niet")
+    auth.clear_fails(request)
     request.session["ok"] = True
     return RedirectResponse(next if next.startswith("/") and not next.startswith("//") else "/", status_code=303)
 
@@ -205,7 +228,7 @@ async def week_save(request: Request, year: int, week: int):
             vak = parse_num(form.get(f"v{i}")) or 0
             factor = parse_num(form.get(f"f{i}")) or 1
             note = (form.get(f"n{i}") or "").strip() or None
-            if hours is None and not storing and not vak and not note and factor == 1:
+            if hours is None and not storing and not vak and not note:
                 conn.execute("DELETE FROM days WHERE date=?", (d.isoformat(),))
             else:
                 upsert_day(conn, d.isoformat(), hours, storing, vak, note, now_iso(), factor)
@@ -317,6 +340,8 @@ def instellingen(request: Request, jaar: int | None = None, msg: str = ""):
     return page(request, "instellingen.html", s=s, jaar=year, tokens=tokens, payouts=payouts, naam=naam,
                 msg=msg, backup=backup.last_status(), bset=backup.get_settings(), backups=backup.list_backups(),
                 linked=backup.onedrive_linked(), SITUATIES=SITUATIES, app=app_info(),
+                hol=holidays.get_settings(), HOLIDAYS=holidays.HOLIDAYS, month_pdfs=backup.list_month_pdfs(),
+                last_month=backup.last_month_pdf(),
                 public_url=purl, guessed_url=str(request.base_url).rstrip("/"))
 
 
@@ -391,9 +416,10 @@ def _apk_response():
 
 # ---- backup
 @app.post("/instellingen/backup", dependencies=[Depends(auth.require_web)])
-def instellingen_backup(tijd: str = Form(...), map_: str = Form("UrenBackup", alias="map"), dagen: int = Form(30)):
+def instellingen_backup(tijd: str = Form(...), map_: str = Form("UrenBackup", alias="map"), dagen: int = Form(30),
+                        maand_pdf: str = Form("")):
     try:
-        backup.save_settings(tijd, map_, dagen)
+        backup.save_settings(tijd, map_, dagen, bool(maand_pdf))
     except ValueError as e:
         return back(str(e), "backup")
     plan_backup()
@@ -428,6 +454,39 @@ def backup_restore(name: str):
     except Exception as e:  # noqa: BLE001
         return back(f"Terugzetten mislukt: {e}", "backup")
     return back(f"{name} teruggezet. De gegevens van vóór het terugzetten staan in {safety}.", "backup")
+
+
+# ---- feestdagen
+@app.post("/instellingen/feestdagen", dependencies=[Depends(auth.require_web)])
+async def instellingen_feestdagen(request: Request):
+    form = await request.form()
+    days = {k: {"on": bool(form.get(f"on_{k}")), "factor": parse_num(form.get(f"f_{k}")) or 2.0}
+            for k, _, _ in holidays.HOLIDAYS}
+    holidays.save_settings(parse_num(form.get("sunday_factor")) or 1.0, days)
+    return back("Feestdagen opgeslagen", "feestdagen")
+
+
+# ---- maandoverzicht
+@app.post("/maand-pdf", dependencies=[Depends(auth.require_web)])
+def maand_pdf_send(maand: str = Form(...)):
+    y, m = (int(x) for x in maand.split("-")[:2])
+    r = backup.send_month_pdf(y, m)
+    if r["error"]:
+        msg = f"Maandoverzicht mislukt: {r['error']}"
+    elif r["upload"] == "ok":
+        msg = f"{r['file']} staat in OneDrive"
+    else:
+        msg = f"{r['file']} gemaakt (alleen op de server: OneDrive is niet gekoppeld)"
+    return back(msg, "backup")
+
+
+@app.get("/maandoverzichten/{name}", dependencies=[Depends(auth.require_web)])
+def maand_pdf_download(name: str):
+    try:
+        f = backup.month_pdf_file(name)
+    except FileNotFoundError:
+        raise HTTPException(404)
+    return FileResponse(f, media_type="application/pdf", filename=name)
 
 
 # ---- OneDrive
@@ -563,7 +622,7 @@ def api_put_day(date: str, body: DayIn):
         if cur is not None and cur["updated_at"] > upd:
             # server heeft een nieuwere versie (bv. via web aangepast): die wint
             return JSONResponse(day_out(cur), status_code=409)
-        if body.hours is None and not body.storing and not body.vakantie and not body.note and body.factor == 1:
+        if body.hours is None and not body.storing and not body.vakantie and not body.note:
             conn.execute("DELETE FROM days WHERE date=?", (d,))
             return {"date": d, "deleted": True}
         upsert_day(conn, d, body.hours, body.storing, body.vakantie, body.note, upd, body.factor)
@@ -601,3 +660,11 @@ def api_app_version():
 @app.get(api + "/app.apk", dependencies=[Depends(auth.require_api)])
 def api_apk():
     return _apk_response()
+
+
+@app.get(api + "/holidays", dependencies=[Depends(auth.require_api)])
+def api_holidays(start: str, end: str):
+    hs = holidays.get_settings()
+    hol = holidays.holidays_between(dt.date.fromisoformat(start), dt.date.fromisoformat(end), hs)
+    return dict(sunday_factor=hs["sunday_factor"],
+                holidays=[dict(date=d.isoformat(), name=v["name"], factor=v["factor"]) for d, v in sorted(hol.items())])

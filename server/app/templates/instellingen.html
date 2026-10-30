@@ -5,7 +5,7 @@
 {% if msg %}<div class="msg">{{ msg }}</div>{% endif %}
 <p class="row" style="gap:6px 14px">
   <a href="#import">Import/export</a><a href="#telefoon">Telefoon</a><a href="#backup">Backup & OneDrive</a>
-  <a href="#jaar">Jaar & tarieven</a><a href="#uitbetalingen">Uitbetalingen</a><a href="#account">Account</a>
+  <a href="#jaar">Jaar & tarieven</a><a href="#feestdagen">Feestdagen</a><a href="#uitbetalingen">Uitbetalingen</a><a href="#account">Account</a>
 </p>
 
 <h2 id="import">Import / export</h2>
@@ -51,8 +51,20 @@
     <div><label>Map in OneDrive</label><input type="text" name="map" value="{{ bset.backup_folder }}"></div>
     <div><label>Bewaar backups (dagen)</label><input type="number" name="dagen" min="1" max="3650" value="{{ bset.backup_keep_days }}"></div>
   </div>
+  <label style="display:flex;gap:8px;align-items:center;margin-bottom:12px;color:inherit;font-size:1rem">
+    <input type="checkbox" name="maand_pdf" value="1" {% if bset.month_pdf == '1' %}checked{% endif %}>
+    Op de 1e van elke maand het maandoverzicht (PDF) van de vorige maand in OneDrive zetten (map Maandoverzichten)</label>
   <button type="submit" class="sec">Opslaan</button>
 </form>
+
+<form method="post" action="/maand-pdf" class="row" style="margin-top:14px">
+  <input type="month" name="maand" value="{{ (today.replace(day=1) - timedelta1).strftime('%Y-%m') }}" required>
+  <button type="submit" class="sec">Maandoverzicht nu versturen</button>
+</form>
+{% if last_month %}<p class="muted">Laatste maandoverzicht: {{ last_month.file }} ({{ last_month.time[:16].replace('T', ' ') }}) —
+{% if last_month.error %}<span class="bad">{{ last_month.error }}</span>{% elif last_month.upload == 'ok' %}<span class="ok">in OneDrive</span>{% else %}{{ last_month.upload }}{% endif %}</p>{% endif %}
+{% if month_pdfs %}<details><summary>Maandoverzichten op de server ({{ month_pdfs|length }})</summary>
+<p>{% for n in month_pdfs %}<a href="/maandoverzichten/{{ n }}">{{ n }}</a>{{ " · " if not loop.last }}{% endfor %}</p></details>{% endif %}
 
 {% if backups %}
 <details style="margin-top:14px"><summary>Backups op de server ({{ backups|length }})</summary>
@@ -80,6 +92,21 @@
     <div><label>Loonheffingskorting</label><select name="loonheffingskorting"><option value="ja" {% if s.loonheffingskorting %}selected{% endif %}>Ja</option><option value="nee" {% if not s.loonheffingskorting %}selected{% endif %}>Nee</option></select></div>
     <div><label>Situatie</label><select name="situatie">{% for k, v in SITUATIES.items() %}<option value="{{ k }}" {% if s.situatie == k %}selected{% endif %}>{{ v }}</option>{% endfor %}</select></div>
   </div>
+  <button type="submit">Opslaan</button>
+</form>
+
+<h2 id="feestdagen">Feestdagen en zondag</h2>
+<form method="post" action="/instellingen/feestdagen" class="card">
+  <p class="muted">Hoe zwaar een dag standaard meetelt als je hem invult. Je kunt het per dag altijd nog aanpassen.
+  Op aangevinkte feestdagen krijg je in de app ook geen herinnering.</p>
+  <div class="scroll"><table><tbody>
+    <tr><td class="l">Zondag</td><td></td><td><select name="sunday_factor">{% for f, l in [(1, '1×'), (1.5, '1,5×'), (2, '2×')] %}<option value="{{ f }}" {% if hol.sunday_factor == f %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></td></tr>
+    {% for k, naam, _ in HOLIDAYS %}{% set c = hol.days[k] %}
+    <tr><td class="l">{{ naam }}</td>
+      <td><input type="checkbox" name="on_{{ k }}" value="1" {% if c.on %}checked{% endif %} title="Telt als feestdag"></td>
+      <td><select name="f_{{ k }}">{% for f, l in [(1, '1×'), (1.5, '1,5×'), (2, '2×')] %}<option value="{{ f }}" {% if c.factor == f %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></td></tr>
+    {% endfor %}
+  </tbody></table></div>
   <button type="submit">Opslaan</button>
 </form>
 

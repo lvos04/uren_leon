@@ -31,6 +31,7 @@
   .totals td:first-child { text-align: left; }
   .totals tr.big td { font-weight: bold; border-top: 2px solid #111; }
   .foot { margin-top: 10px; font-size: 8pt; color: #666; }
+  .holn { display: block; font-size: 6.5pt; color: #555; }
   .fac { display: block; font-size: 7.5pt; color: #b54708; font-weight: bold; }
   .empty { color: #666; font-style: italic; }
   @media screen { body { background: #e9ecef; } .page { background: #fff; width: 210mm; min-height: 297mm; margin: 10px auto; padding: 14mm 13mm; box-shadow: 0 1px 4px rgba(0,0,0,.2); } }
@@ -51,7 +52,7 @@
     <table>
       <tr>
         <th class="lbl"></th>
-        {% for d in w.dates %}<th class="{% if d.month != M.month %}out{% endif %}"><b>{{ dagen[loop.index0] }}</b>{{ d.strftime("%d-%m") }}</th>{% endfor %}
+        {% for d in w.dates %}<th class="{% if d.month != M.month %}out{% endif %}"><b>{{ dagen[loop.index0] }}</b>{{ d.strftime("%d-%m") }}{% if w.holiday[loop.index0] %}<small class="holn">{{ w.holiday[loop.index0] }}</small>{% endif %}</th>{% endfor %}
         <th class="sum">Totaal</th><th class="sum">Overuren</th>
       </tr>
       <tr>
