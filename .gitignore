@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+.pytest_cache/
+/data/
+*.xlsx
+!server/tests/fixtures/*.xlsx
+.venv/
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+*.apk
+*.keystore
+*.jks

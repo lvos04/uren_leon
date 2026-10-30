@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}{{ M.naam|capitalize }} {{ Y.year }}{% endblock %}
+{% block content %}
+{% set pm = (Y.year, M.month - 1) if M.month > 1 else (Y.year - 1, 12) %}
+{% set nm = (Y.year, M.month + 1) if M.month < 12 else (Y.year + 1, 1) %}
+<div class="spread">
+  <h1><a href="/maand/{{ pm[0] }}/{{ pm[1] }}">‹</a> {{ M.naam|capitalize }} {{ Y.year }} <a href="/maand/{{ nm[0] }}/{{ nm[1] }}">›</a></h1>
+  <div class="row"><a class="btn" href="/print/{{ Y.year }}/{{ M.month }}.pdf">🖨 Print (PDF)</a><a class="btn sec" href="/print/{{ Y.year }}/{{ M.month }}">Voorbeeld</a></div>
+</div>
+{% if saved %}<div class="msg">Opgeslagen.</div>{% endif %}
+<div class="grid">
+  <div class="stat"><div class="l">Uren</div><div class="v">{{ M.uren|uur }}</div>{% if M.gewerkt != M.uren %}<div class="l">gewerkt {{ M.gewerkt|uur }} (rest = toeslag zon-/feestdag)</div>{% endif %}</div>
+  <div class="stat"><div class="l">Overuren</div><div class="v">{{ M.overuren|uur }}</div></div>
+  <div class="stat"><div class="l">€ overuren (netto)</div><div class="v">{{ M.overuren_euro|euro }}</div><div class="l">schaal {{ M.schaal }} · {{ M.rate|euro }}/u</div></div>
+  <div class="stat"><div class="l">Storingsdienst</div><div class="v">{{ M.storing_euro|euro }}</div><div class="l">{{ M.storing_days }} dagen × {{ M.storing_rate|euro }}</div></div>
+  <div class="stat"><div class="l">Totaal netto</div><div class="v">{{ M.totaal_netto|euro }}</div></div>
+</div>
+
+<h2>Weken</h2>
+<div class="card scroll"><table>
+<thead><tr><th>Week</th>{% for d in DAGEN_KORT %}<th>{{ d }}</th>{% endfor %}<th>Totaal</th><th>Over</th><th>St.</th><th>Vak.</th></tr></thead>
+<tbody>{% for w in M.weeks %}
+<tr><td><a href="/week/{{ w.iso_year }}/{{ w.week }}">{{ w.week }}</a></td>{% for h in w.hours %}<td>{{ h|uur }}</td>{% endfor %}
+<td><b>{{ (w.total or none)|uur }}</b></td><td{% if w.overuren %} class="over"{% endif %}>{{ (w.overuren or none)|uur }}</td><td>{{ w.storing_days or "" }}</td><td>{{ (w.vakantie_days or none)|uur }}</td></tr>
+{% endfor %}</tbody></table></div>
+
+<h2>Salaris</h2>
+<form method="post" class="card">
+  <div class="form-grid">
+    <div><label>Bruto salaris</label><input type="text" inputmode="decimal" name="bruto" value="{{ '%.2f'|format(M.bruto) if M.bruto is not none else '' }}"></div>
+    <div><label>Nettoloon (loonstrook)</label><input type="text" inputmode="decimal" name="netto" value="{{ '%.2f'|format(M.netto) if M.netto is not none else '' }}"></div>
+    <div><label>Overuurschaal</label><select name="schaal"><option value="1" {% if M.schaal == 1 %}selected{% endif %}>1 ({{ Y.settings.rate1|euro }}/u)</option><option value="2" {% if M.schaal == 2 %}selected{% endif %}>2 ({{ Y.settings.rate2|euro }}/u)</option></select></div>
+  </div>
+  {% if schatting %}<p class="muted">Schatting netto bij dit bruto: <b>{{ schatting.netto|euro }}</b> (tarieven {{ schatting.tarief_jaar }}, zonder pensioen e.d.) · <a href="/calculator?bruto={{ M.bruto }}&jaar={{ Y.year }}">calculator</a></p>{% endif %}
+  <button type="submit">Opslaan</button>
+</form>
+{% endblock %}

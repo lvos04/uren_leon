@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="nl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inloggen - Uren</title><link rel="stylesheet" href="/static/style.css"><link rel="icon" href="/static/icon.svg"></head>
+<body><main class="login"><div class="card">
+<h1>⏱ Uren</h1>
+{% if error %}<p class="bad">{{ error }}</p>{% endif %}
+<form method="post" action="/login">
+  <input type="hidden" name="next" value="{{ next }}">
+  <label for="pw">Wachtwoord</label>
+  <input id="pw" type="password" name="password" autofocus style="width:100%;margin-bottom:12px">
+  <button type="submit" style="width:100%">Inloggen</button>
+</form></div></main></body></html>

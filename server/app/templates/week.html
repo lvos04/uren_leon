@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Week {{ W.week }} - {{ W.iso_year }}{% endblock %}
+{% block content %}
+<div class="spread">
+  <h1><a href="/week/{{ prev[0] }}/{{ prev[1] }}">‹</a> Week {{ W.week }}, {{ W.iso_year }} <a href="/week/{{ next[0] }}/{{ next[1] }}">›</a></h1>
+  <span class="muted">{{ W.dates[0].strftime("%d-%m") }} t/m {{ W.dates[6].strftime("%d-%m-%Y") }}</span>
+</div>
+{% if saved %}<div class="msg">Opgeslagen.</div>{% endif %}
+<form method="post" class="card">
+<div class="scroll"><table class="days">
+<thead><tr><th>Dag</th><th>Uren</th><th title="Storingsdienst">Storing</th><th title="Uren van deze dag tellen 1x, 1,5x of 2x mee (zon-/feestdag)">Telt</th><th title="Vakantiedag (1 of 0,5)">Vakantie</th><th class="l hide-sm">Notitie</th></tr></thead>
+<tbody>
+{% for d in W.dates %}{% set i = loop.index0 %}
+<tr{% if d == today %} class="cur"{% endif %}>
+  <td>{{ DAGEN_KORT[i] }} <span class="muted">{{ d.strftime("%d-%m") }}</span></td>
+  <td><input class="h" style="width:4.2em" type="text" inputmode="decimal" name="h{{ i }}" value="{{ W.hours[i]|uur }}"></td>
+  <td style="text-align:center"><input type="checkbox" name="s{{ i }}" value="1" {% if W.storing[i] %}checked{% endif %}></td>
+  <td><select name="f{{ i }}">{% for f, lbl in [(1, '1×'), (1.5, '1,5×'), (2, '2×')] %}<option value="{{ f }}" {% if W.factor[i] == f %}selected{% endif %}>{{ lbl }}</option>{% endfor %}</select></td>
+  <td><select name="v{{ i }}"><option value="0"></option><option value="1" {% if W.vakantie[i] == 1 %}selected{% endif %}>hele dag</option><option value="0.5" {% if W.vakantie[i] == 0.5 %}selected{% endif %}>halve dag</option></select></td>
+  <td class="l hide-sm"><input type="text" name="n{{ i }}" value="{{ notes.get(d.isoformat()) or '' }}" style="width:100%"></td>
+</tr>
+{% endfor %}
+</tbody>
+<tfoot><tr><td>Totaal</td><td>{{ W.total|uur }}</td><td style="text-align:center">{{ W.storing_days or "" }}</td><td></td><td>{{ (W.vakantie_days or none)|uur }}</td><td class="l hide-sm">Overuren: {{ W.overuren|uur }}{% if W.gewerkt != W.total %} · gewerkt {{ W.gewerkt|uur }} u{% endif %}</td></tr></tfoot>
+</table></div>
+<details style="margin:12px 0">
+  <summary class="muted">Meer: maand en extra dagen</summary>
+  <div class="form-grid" style="margin-top:10px">
+    <div><label>Week telt mee in maand</label>
+      <select name="month"><option value="0">Automatisch ({{ MAANDEN[W.dates[3].month-1] }})</option>
+      {% for m in MAANDEN %}<option value="{{ loop.index }}" {% if W.month_override and W.month == loop.index %}selected{% endif %}>{{ m }}</option>{% endfor %}</select></div>
+    <div><label>Extra storingsdagen (zonder dag)</label><input type="number" name="storing_extra" min="0" max="7" value="{{ W.storing_extra }}"></div>
+    <div><label>Extra vakantiedagen (zonder dag)</label><input type="text" inputmode="decimal" name="vakantie_extra" value="{{ W.vakantie_extra|uur }}"></div>
+  </div>
+</details>
+<button type="submit">Opslaan</button>
+<a class="btn sec" href="/print/{{ W.iso_year }}/{{ W.month }}.pdf">Print maand {{ MAANDEN[W.month-1] }}</a>
+</form>
+<p class="muted">Telt 1,5× / 2×: de uren van die dag tellen 1,5 of 2 keer mee in het weektotaal (zon-/feestdagen), dus ook voor de overuren.</p>
+{% endblock %}

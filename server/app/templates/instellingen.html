@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block title %}Instellingen{% endblock %}
+{% block content %}
+<h1>Instellingen</h1>
+{% if msg %}<div class="msg">{{ msg }}</div>{% endif %}
+{% if new_token %}
+<div class="card"><b>Nieuw token voor de Android-app</b> — kopieer het nu, het wordt maar één keer getoond:
+<code class="token">{{ new_token }}</code></div>
+{% endif %}
+
+<h2>Jaar {{ jaar }}</h2>
+<form method="get" class="row" style="margin-bottom:8px"><label style="margin:0">Ander jaar:</label><input type="number" name="jaar" value="{{ jaar }}" style="width:7em"><button class="sec">Toon</button></form>
+<form method="post" action="/instellingen/jaar" class="card">
+  <input type="hidden" name="jaar" value="{{ jaar }}">
+  {% if not s.own %}<p class="muted">Nog geen eigen instellingen voor {{ jaar }}; hieronder staan die van het vorige jaar.</p>{% endif %}
+  <div class="form-grid">
+    <div><label>Contracturen per week</label><input type="text" inputmode="decimal" name="contract_hours" value="{{ s.contract_hours|uur }}"></div>
+    <div><label>Overuren schaal 1 (€/u netto)</label><input type="text" inputmode="decimal" name="rate1" value="{{ s.rate1 }}"></div>
+    <div><label>Overuren schaal 2 (€/u netto)</label><input type="text" inputmode="decimal" name="rate2" value="{{ s.rate2 }}"></div>
+    <div><label>Storingsdienst (€ per dag)</label><input type="text" inputmode="decimal" name="storing_rate" value="{{ s.storing_rate }}"></div>
+    <div><label>Vakantiedagen per jaar</label><input type="text" inputmode="decimal" name="vakantie_totaal" value="{{ s.vakantie_totaal|uur }}"></div>
+    <div><label>Loonheffingskorting</label><select name="loonheffingskorting"><option value="ja" {% if s.loonheffingskorting %}selected{% endif %}>Ja</option><option value="nee" {% if not s.loonheffingskorting %}selected{% endif %}>Nee</option></select></div>
+    <div><label>Situatie</label><select name="situatie">{% for k, v in SITUATIES.items() %}<option value="{{ k }}" {% if s.situatie == k %}selected{% endif %}>{{ v }}</option>{% endfor %}</select></div>
+  </div>
+  <button type="submit">Opslaan</button>
+</form>
+
+<h2>Naam op de print</h2>
+<form method="post" action="/instellingen/naam" class="card row">
+  <input type="text" name="naam" value="{{ naam }}" placeholder="bv. Leon" style="flex:1">
+  <button type="submit">Opslaan</button>
+</form>
+
+<h2 id="uitbetalingen">Uitbetaalde overuren</h2>
+<div class="card">
+<form method="post" action="/uitbetalingen" class="row" style="margin-bottom:10px">
+  <input type="date" name="date" value="{{ today.isoformat() }}" required>
+  <input type="text" inputmode="decimal" name="amount" placeholder="Bedrag" required style="width:8em">
+  <input type="text" name="note" placeholder="Notitie" style="flex:1">
+  <button type="submit">Toevoegen</button>
+</form>
+{% if payouts %}<div class="scroll"><table>
+<thead><tr><th>Datum</th><th>Bedrag</th><th class="l">Notitie</th><th></th></tr></thead>
+<tbody>{% for p in payouts %}<tr><td>{{ p.date }}</td><td>{{ p.amount|euro }}</td><td class="l muted">{{ p.note or "" }}</td>
+<td><form method="post" action="/uitbetalingen/{{ p.id }}/delete"><button class="danger" title="Verwijderen">✕</button></form></td></tr>{% endfor %}</tbody>
+</table></div>{% else %}<p class="muted">Nog geen uitbetalingen.</p>{% endif %}
+</div>
+
+<h2>Android-app</h2>
+<div class="card">
+<p>Maak een token aan en vul in de app de server-URL en dit token in.</p>
+<form method="post" action="/tokens" class="row"><input type="text" name="name" value="Telefoon"><button type="submit">Nieuw token</button></form>
+{% if tokens %}<table style="margin-top:10px"><tbody>{% for t in tokens %}
+<tr><td>{{ t.name }}</td><td class="muted">{{ t.created_at }}</td><td><form method="post" action="/tokens/{{ t.id }}/delete"><button class="danger">intrekken</button></form></td></tr>
+{% endfor %}</tbody></table>{% endif %}
+</div>
+
+<h2>Backup</h2>
+<div class="card">
+<p>Elke nacht wordt een kopie van de database en een Excel-export gemaakt in <code>/data/backups</code>
+{% if rclone %}en geüpload naar <b>{{ remote }}</b>.{% else %}— <span class="bad">OneDrive is nog niet gekoppeld</span> (zie README: rclone.conf in <code>/data/rclone/</code>).{% endif %}</p>
+{% if backup %}<p>Laatste backup: {{ backup.time }} —
+{% if backup.ok %}<span class="ok">gelukt</span>{% else %}<span class="bad">mislukt</span>{% endif %}
+{% if backup.upload %}· upload: {{ backup.upload }}{% endif %}{% if backup.error %}<br><span class="bad">{{ backup.error }}</span>{% endif %}</p>{% endif %}
+<form method="post" action="/backup"><button type="submit" class="sec">Nu backup maken</button></form>
+</div>
+
+<h2>Import / export</h2>
+<div class="card">
+<p><a class="btn sec" href="/export.xlsx">Download alles als Excel</a></p>
+<form method="post" action="/import" enctype="multipart/form-data" class="row">
+  <input type="file" name="file" accept=".xlsx" required>
+  <button type="submit">Importeer oud Excel-bestand</button>
+</form>
+<p class="muted">Import leest tabbladen met een jaartal als naam (bv. 2024). Bestaande uren op dezelfde dagen worden overschreven.</p>
+</div>
+{% endblock %}

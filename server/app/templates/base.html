@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Uren{% endblock %}</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="icon" href="/static/icon.svg">
+</head>
+<body>
+<header><nav>
+  <a class="brand" href="/">⏱ Uren</a>
+  <a href="/vandaag">Deze week</a>
+  <a href="/jaar/{{ today.isocalendar()[0] }}">Jaar</a>
+  <a href="/maand/{{ today.year }}/{{ today.month }}">Maand</a>
+  <a href="/calculator">Bruto-netto</a>
+  <a href="/instellingen">Instellingen</a>
+  <a href="/logout" class="muted">Uit</a>
+</nav></header>
+<main>{% block content %}{% endblock %}</main>
+</body>
+</html>

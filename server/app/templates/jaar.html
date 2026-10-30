@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Uren {{ Y.year }}{% endblock %}
+{% block content %}
+{% set t = Y.totals %}
+<div class="spread">
+  <h1><a href="/jaar/{{ Y.year - 1 }}">‹</a> {{ Y.year }} <a href="/jaar/{{ Y.year + 1 }}">›</a></h1>
+  <div class="row"><a class="btn sec" href="/print/{{ Y.year }}.pdf">Print hele jaar (PDF)</a></div>
+</div>
+<div class="grid">
+  <div class="stat"><div class="l">Totaal uren</div><div class="v">{{ t.uren|uur }}</div></div>
+  <div class="stat"><div class="l">Overuren</div><div class="v">{{ t.overuren|uur }}</div></div>
+  <div class="stat"><div class="l">€ overuren (netto)</div><div class="v">{{ t.overuren_euro|euro }}</div></div>
+  <div class="stat"><div class="l">Storingsdienst</div><div class="v">{{ t.storing_dagen }} d · {{ t.storing_euro|euro }}</div></div>
+  <div class="stat"><div class="l">Totaal netto</div><div class="v">{{ t.totaal_netto|euro }}</div></div>
+  <div class="stat"><div class="l">Vakantiedagen over</div><div class="v">{{ t.vakantie_over|uur }} <span class="muted" style="font-size:.8rem">/ {{ Y.settings.vakantie_totaal|uur }}</span></div><div class="l">uit te betalen {{ t.vakantie_uitbetalen|euro }}</div></div>
+  {% if t.belasting_betaald %}<div class="stat"><div class="l">Belasting betaald</div><div class="v">{{ t.belasting_betaald|euro }}</div></div>{% endif %}
+  {% if t.nog_te_goed is not none %}<div class="stat"><div class="l">Nog te goed</div><div class="v">{{ t.nog_te_goed|euro }}</div><div class="l">uitbetaald {{ t.uitbetaald|euro }}</div></div>{% endif %}
+  <div class="stat"><div class="l">Gem. week (&gt; {{ Y.settings.contract_hours|uur }} u)</div><div class="v">{{ t.gem_week_boven_contract|round(1)|uur }}</div></div>
+</div>
+
+<h2>Per maand</h2>
+<div class="card scroll"><table>
+<thead><tr><th>Maand</th><th class="hide-sm">Salaris</th><th>Nettoloon</th><th>Uren</th><th>Overuren</th><th>€ overuren</th><th>Storing</th><th>Totaal netto</th><th></th></tr></thead>
+<tbody>
+{% for m in Y.months %}
+<tr><td><a href="/maand/{{ Y.year }}/{{ m.month }}">{{ m.naam|capitalize }}</a></td>
+<td class="hide-sm">{{ m.bruto|euro }}</td><td>{{ m.netto|euro }}</td><td>{{ m.uren|uur }}</td><td>{{ m.overuren|uur }}{% if m.schaal == 2 %} <span class="muted">(s2)</span>{% endif %}</td>
+<td>{{ m.overuren_euro|euro }}</td><td>{{ m.storing_days or "" }}</td><td>{{ m.totaal_netto|euro }}</td>
+<td><a href="/print/{{ Y.year }}/{{ m.month }}.pdf" title="Printen">🖨</a></td></tr>
+{% endfor %}
+</tbody>
+<tfoot><tr><td>Totaal</td><td class="hide-sm">{{ t.bruto|euro }}</td><td>{{ t.netto|euro }}</td><td>{{ t.uren|uur }}</td><td>{{ t.overuren|uur }}</td><td>{{ t.overuren_euro|euro }}</td><td>{{ t.storing_dagen }}</td><td>{{ t.totaal_netto|euro }}</td><td></td></tr></tfoot>
+</table></div>
+
+<h2>Per week</h2>
+<div class="card scroll"><table>
+<thead><tr><th>Week</th>{% for d in DAGEN_KORT %}<th>{{ d }}</th>{% endfor %}<th>Totaal</th><th>Over</th><th class="l">Maand</th><th title="Storingsdagen">St.</th><th title="Vakantiedagen">Vak.</th></tr></thead>
+<tbody>
+{% for w in Y.weeks %}
+<tr{% if w.week == cur_week %} class="cur"{% endif %}>
+<td><a href="/week/{{ Y.year }}/{{ w.week }}">{{ w.week }}</a></td>
+{% for h in w.hours %}<td>{{ h|uur }}</td>{% endfor %}
+<td><b>{{ (w.total or none)|uur }}</b></td><td{% if w.overuren %} class="over"{% endif %}>{{ (w.overuren or none)|uur }}</td>
+<td class="l muted">{{ MAANDEN[w.month-1][:3] }}{% if w.month_override %}*{% endif %}</td>
+<td>{{ w.storing_days or "" }}</td><td>{{ (w.vakantie_days or none)|uur }}</td>
+</tr>
+{% endfor %}
+</tbody></table></div>
+<p class="muted">* maand handmatig ingesteld. Een week hoort standaard bij de maand waarin de donderdag valt.</p>
+{% endblock %}

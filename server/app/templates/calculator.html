@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Bruto-netto{% endblock %}
+{% block content %}
+<h1>Bruto-netto salaris</h1>
+<form method="get" class="card">
+  <div class="form-grid">
+    <div><label>Bruto maandloon</label><input type="text" inputmode="decimal" name="bruto" value="{{ bruto }}" autofocus></div>
+    <div><label>Jaar (tarieven)</label><input type="number" name="jaar" value="{{ jaar }}"></div>
+    <div><label>Loonheffingskorting</label><select name="lhk"><option value="ja" {% if lhk == 'ja' %}selected{% endif %}>Ja (enige/belangrijkste inkomen)</option><option value="nee" {% if lhk == 'nee' %}selected{% endif %}>Nee</option></select></div>
+    <div><label>Situatie</label><select name="situatie">{% for k, v in SITUATIES.items() %}<option value="{{ k }}" {% if situatie == k %}selected{% endif %}>{{ v }}</option>{% endfor %}</select></div>
+    <div><label>Pensioenpremie p/m (optioneel)</label><input type="text" inputmode="decimal" name="pensioen" value="{{ pensioen }}"></div>
+    <div><label>Overige inhoudingen p/m (optioneel)</label><input type="text" inputmode="decimal" name="overig" value="{{ overig }}"></div>
+  </div>
+  <button type="submit">Bereken</button>
+</form>
+{% if res %}
+<div class="card"><table>
+<tr><td>Brutoloon per maand</td><td>{{ res.bruto|euro }}</td></tr>
+{% if res.pensioen %}<tr><td>Pensioenpremie</td><td>− {{ res.pensioen|euro }}</td></tr>{% endif %}
+<tr><td>Loonbelasting / premie volksverzekeringen</td><td>− {{ res.loonbelasting|euro }}</td></tr>
+<tr><td>Algemene heffingskorting</td><td>+ {{ res.algemene_heffingskorting|euro }}</td></tr>
+<tr><td>Arbeidskorting</td><td>+ {{ res.arbeidskorting|euro }}</td></tr>
+{% if res.overig %}<tr><td>Overige inhoudingen</td><td>− {{ res.overig|euro }}</td></tr>{% endif %}
+<tfoot><tr><td>Nettoloon per maand</td><td>{{ res.netto|euro }} <span class="muted">({{ (res.netto_pct*100)|round(1) }}%)</span></td></tr>
+<tr><td>Belastingdruk</td><td>{{ res.druk|euro }} <span class="muted">({{ (res.druk_pct*100)|round(1) }}%)</span></td></tr></tfoot>
+</table>
+<p class="muted">Schatting met de tarieven van {{ res.tarief_jaar }} (maandloon × 12). Je loonstrook kan afwijken door vakantiegeld, pensioen en andere inhoudingen. Overuren zijn netto en worden hier niet meegerekend.</p>
+<form method="post" action="/calculator/overnemen" class="row">
+  <input type="hidden" name="jaar" value="{{ jaar }}"><input type="hidden" name="bruto" value="{{ res.bruto }}"><input type="hidden" name="netto" value="{{ res.netto }}">
+  <select name="maand">{% for m in MAANDEN %}<option value="{{ loop.index }}" {% if loop.index == today.month %}selected{% endif %}>{{ m }}</option>{% endfor %}</select>
+  <button type="submit" class="sec">Neem over als netto voor deze maand</button>
+</form>
+</div>
+{% endif %}
+{% endblock %}

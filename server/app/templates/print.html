@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<title>Urenoverzicht {{ Y.year }}</title>
+<style>
+  @page { size: A4; margin: 14mm 13mm; }
+  * { box-sizing: border-box; }
+  body { font: 10.5pt/1.35 "DejaVu Sans", Arial, sans-serif; color: #111; margin: 0; background: #fff; }
+  .page { page-break-after: always; break-after: page; }
+  .page:last-child { page-break-after: auto; break-after: auto; }
+  .head { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 2px solid #111; padding-bottom: 4px; margin-bottom: 10px; }
+  .head h1 { font-size: 16pt; margin: 0; }
+  .head .who { font-size: 11pt; color: #444; }
+  .week { border: 1px solid #999; border-radius: 4px; margin-bottom: 8px; page-break-inside: avoid; break-inside: avoid; }
+  .week-title { background: #eef1f5; padding: 3px 8px; font-weight: bold; display: flex; justify-content: space-between; }
+  .week-title span { font-weight: normal; color: #444; }
+  table { border-collapse: collapse; width: 100%; table-layout: fixed; font-variant-numeric: tabular-nums; }
+  th, td { border-top: 1px solid #ccc; padding: 3px 4px; text-align: center; }
+  th { font-size: 8.5pt; font-weight: normal; color: #333; }
+  th b { display: block; font-size: 9.5pt; color: #111; }
+  td.lbl, th.lbl { text-align: left; width: 17%; color: #444; font-size: 9pt; }
+  td.sum, th.sum { background: #f6f6f6; width: 10%; font-weight: bold; }
+  td.hrs { font-size: 11pt; height: 22px; }
+  .out { color: #999; background: #fafafa; }
+  .out b { color: #999; }
+  .totals { margin-top: 12px; page-break-inside: avoid; break-inside: avoid; }
+  .totals table { table-layout: auto; width: 70%; }
+  .totals td:last-child { white-space: nowrap; }
+  .totals td { text-align: right; border-top: 1px solid #ddd; padding: 3px 8px; }
+  .totals td:first-child { text-align: left; }
+  .totals tr.big td { font-weight: bold; border-top: 2px solid #111; }
+  .foot { margin-top: 10px; font-size: 8pt; color: #666; }
+  .fac { display: block; font-size: 7.5pt; color: #b54708; font-weight: bold; }
+  .empty { color: #666; font-style: italic; }
+  @media screen { body { background: #e9ecef; } .page { background: #fff; width: 210mm; min-height: 297mm; margin: 10px auto; padding: 14mm 13mm; box-shadow: 0 1px 4px rgba(0,0,0,.2); } }
+</style>
+</head>
+<body>
+{% for M in months %}
+<section class="page">
+  <div class="head">
+    <h1>Urenoverzicht {{ M.naam }} {{ Y.year }}</h1>
+    <div class="who">{{ naam }}</div>
+  </div>
+
+  {% if not M.weeks %}<p class="empty">Geen weken in deze maand.</p>{% endif %}
+  {% for w in M.weeks %}
+  <div class="week">
+    <div class="week-title">Week {{ w.week }} <span>{{ w.dates[0].strftime("%d-%m") }} t/m {{ w.dates[6].strftime("%d-%m-%Y") }}</span></div>
+    <table>
+      <tr>
+        <th class="lbl"></th>
+        {% for d in w.dates %}<th class="{% if d.month != M.month %}out{% endif %}"><b>{{ dagen[loop.index0] }}</b>{{ d.strftime("%d-%m") }}</th>{% endfor %}
+        <th class="sum">Totaal</th><th class="sum">Overuren</th>
+      </tr>
+      <tr>
+        <td class="lbl">Uren</td>
+        {% for h in w.hours %}{% set f = w.factor[loop.index0] %}<td class="hrs {% if w.dates[loop.index0].month != M.month %}out{% endif %}">{{ h|uur }}{% if f != 1 %}<small class="fac">{{ '2×' if f == 2 else '1,5×' if f == 1.5 else f|uur ~ '×' }}</small>{% endif %}</td>{% endfor %}
+        <td class="sum hrs">{{ w.total|uur }}{% if w.gewerkt != w.total %}<small class="fac">gewerkt {{ w.gewerkt|uur }}</small>{% endif %}</td><td class="sum hrs">{{ w.overuren|uur }}</td>
+      </tr>
+      {% if w.storing_days or w.vakantie_days %}
+      <tr>
+        <td class="lbl">Storing / vakantie</td>
+        {% for i in range(7) %}<td class="{% if w.dates[i].month != M.month %}out{% endif %}">{% if w.storing[i] %}S{% endif %}{% if w.vakantie[i] %} V{% if w.vakantie[i] != 1 %}½{% endif %}{% endif %}</td>{% endfor %}
+        <td class="sum">{% if w.storing_days %}{{ w.storing_days }} S{% endif %}</td><td class="sum">{% if w.vakantie_days %}{{ w.vakantie_days|uur }} V{% endif %}</td>
+      </tr>
+      {% endif %}
+    </table>
+  </div>
+  {% endfor %}
+
+  <div class="totals">
+    <table>
+      <tr><td>Uren (zon-/feestdagen 1,5×/2× meegeteld)</td><td>{{ M.uren|uur }}</td></tr>
+      {% if M.gewerkt != M.uren %}<tr><td>Werkelijk gewerkt</td><td>{{ M.gewerkt|uur }}</td></tr>{% endif %}
+      <tr><td>Overuren (boven {{ Y.settings.contract_hours|uur }} u/week)</td><td>{{ M.overuren|uur }}</td></tr>
+      <tr><td>Overuren netto (schaal {{ M.schaal }}, {{ M.rate|euro }}/u)</td><td>{{ M.overuren_euro|euro }}</td></tr>
+      {% if M.storing_days %}<tr><td>Storingsdienst ({{ M.storing_days }} × {{ M.storing_rate|euro }})</td><td>{{ M.storing_euro|euro }}</td></tr>{% endif %}
+      {% if M.vakantie_days %}<tr><td>Vakantiedagen</td><td>{{ M.vakantie_days|uur }}</td></tr>{% endif %}
+      {% if M.netto is not none %}<tr><td>Nettoloon</td><td>{{ M.netto|euro }}</td></tr>{% endif %}
+      <tr class="big"><td>Totaal netto</td><td>{{ M.totaal_netto|euro }}</td></tr>
+    </table>
+  </div>
+  <div class="foot">Grijze dagen vallen buiten {{ M.naam }}, maar horen bij een week die in {{ M.naam }} meetelt. S = storingsdienst, V = vakantiedag, 1,5× / 2× = uren van die dag tellen 1,5 of 2 keer mee.
+    Vakantiedagen {{ Y.year }}: {{ Y.totals.vakantie_gebruikt|uur }} gebruikt, {{ Y.totals.vakantie_over|uur }} over.</div>
+</section>
+{% endfor %}
+</body>
+</html>
