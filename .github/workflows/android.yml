@@ -1,0 +1,43 @@
+name: Android
+
+on:
+  push:
+    paths: ["android/**", ".github/workflows/android.yml"]
+    tags: ["app-v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    defaults: { run: { working-directory: android } }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: "17" }
+      - uses: android-actions/setup-android@v3
+      - name: Keystore uit secret
+        env:
+          KEYSTORE_B64: ${{ secrets.UREN_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/uren.jks"
+            echo "UREN_KEYSTORE=$RUNNER_TEMP/uren.jks" >> "$GITHUB_ENV"
+          else
+            echo "::warning::Geen UREN_KEYSTORE_B64 secret: APK wordt met een tijdelijke sleutel ondertekend (updaten over een eerdere versie lukt dan niet)."
+          fi
+      - name: Build
+        env:
+          UREN_KEYSTORE_PASSWORD: ${{ secrets.UREN_KEYSTORE_PASSWORD }}
+          UREN_KEY_ALIAS: ${{ secrets.UREN_KEY_ALIAS }}
+          UREN_KEY_PASSWORD: ${{ secrets.UREN_KEY_PASSWORD }}
+        run: ./gradlew --no-daemon testDebugUnitTest assembleRelease
+      - run: cp app/build/outputs/apk/release/app-release.apk uren.apk
+      - uses: actions/upload-artifact@v4
+        with: { name: uren-apk, path: android/uren.apk }
+      - name: Release (bij tag app-v*)
+        if: startsWith(github.ref, 'refs/tags/app-v')
+        uses: softprops/action-gh-release@v2
+        with: { files: android/uren.apk }
