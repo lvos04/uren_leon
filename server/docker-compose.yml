@@ -1,5 +1,6 @@
 # Alternatief voor het TrueNAS-formulier (Apps -> Discover Apps -> ⋮ -> Install via YAML).
-# Alleen het pad naar je dataset aanpassen. Wachtwoord en alle andere instellingen regel je in de web-app.
+# Alleen het pad naar je dataset aanpassen. (In het Custom App-formulier: TZ niet als
+# environment variable invullen, maar het veld Timezone gebruiken.) Wachtwoord en alle andere instellingen regel je in de web-app.
 services:
   uren:
     image: ghcr.io/lvos04/uren_leon:latest

@@ -28,7 +28,7 @@ TrueNAS → **Apps** → **Discover Apps** → **Custom App**. Vul in:
 | Application Name | `uren` |
 | Image → Repository | `ghcr.io/lvos04/uren_leon` |
 | Image → Tag | `latest` |
-| Environment Variables | `TZ` = `Europe/Amsterdam` |
+| Timezone (bovenaan het formulier) | `Europe/Amsterdam` — **niet** ook als Environment Variable toevoegen |
 | Network → Port Forwarding | Container Port `8080`, Host Port `8085` |
 | Storage → Host Path | Mount Path `/data`, Host Path: een map op je pool, bv. `/mnt/tank/apps/uren` (maak hem aan met het mapje-icoon) |
 
